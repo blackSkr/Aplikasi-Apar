@@ -335,7 +335,7 @@ const CRUDAparTest: React.FC = () => {
         )}
 
         {/* Sisa form: No. APAR, Lokasi, Jenis, Checklist, dsb. */}
-        <Label>No. APAR</Label>
+        <Label style={{ paddingTop: 16 }}>No. APAR</Label>
         <Input
           value={noApar}
           onChangeText={setNoApar}

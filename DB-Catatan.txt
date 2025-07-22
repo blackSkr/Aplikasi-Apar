@@ -1,0 +1,8 @@
+server name : LAPTOP-1H4NLMP1\SQLEXPRESS
+password : 12345678 
+type : database Engine
+
+curl -X POST http://localhost:3000/api/petugas -H "Content-Type: application/json" -d "{\"id_petugas\": \"some-unique-id\", \"badge_number\": \"123\", \"nama_petugas\": \"John Does\", \"departemen\": \"HR\", \"password\": \"password123\"}"{"message":"Data petugas berhasil ditambahkan."} 
+
+
+adb logcat *:S ReactNative:V

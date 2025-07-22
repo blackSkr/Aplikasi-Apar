@@ -1,0 +1,233 @@
+
+[
+  {
+    "id": "AP-CO2",
+    "type": "CO₂ - Type",
+    "weight": "6kg",
+    "petugas": "Udin",
+    "status": "Sehat",
+    "daysRemaining": 12,
+    "nextCheckDate": "2025-08-01",
+    "location": "Gudang A"
+  },
+  {
+    "id": "AP-F02",
+    "type": "Foam - Type",
+    "weight": "5kg",
+    "petugas": "Budi",
+    "status": "Trouble",
+    "daysRemaining": 3,
+    "nextCheckDate": "2025-07-18",
+    "location": "Gudang B"
+  },
+  {
+    "id": "AP-D02",
+    "type": "Water - Type",
+    "weight": "9L",
+    "petugas": "Siti",
+    "status": "Expired",
+    "daysRemaining": 0,
+    "nextCheckDate": "2025-07-01",
+    "location": "Gudang C"
+  },
+  {
+    "id": "AP-CO03",
+    "type": "CO₂ - Type",
+    "weight": "6kg",
+    "petugas": "Andi",
+    "status": "Sehat",
+    "daysRemaining": 20,
+    "nextCheckDate": "2025-08-15",
+    "location": "Gudang D"
+  },
+  {
+    "id": "AP-F03",
+    "type": "Foam - Type",
+    "weight": "4kg",
+    "petugas": "Rina",
+    "status": "Trouble",
+    "daysRemaining": 5,
+    "nextCheckDate": "2025-07-20",
+    "location": "Gudang E"
+  },
+  {
+    "id": "AP-D03",
+    "type": "Water - Type",
+    "weight": "10L",
+    "petugas": "Wati",
+    "status": "Sehat",
+    "daysRemaining": 15,
+    "nextCheckDate": "2025-08-05",
+    "location": "Gudang F"
+  },
+  {
+    "id": "AP-CO04",
+    "type": "CO₂ - Type",
+    "weight": "5.5kg",
+    "petugas": "Tono",
+    "status": "Expired",
+    "daysRemaining": 0,
+    "nextCheckDate": "2025-07-05",
+    "location": "Gudang G"
+  },
+  {
+    "id": "AP-F04",
+    "type": "Foam - Type",
+    "weight": "3kg",
+    "petugas": "Joko",
+    "status": "Sehat",
+    "daysRemaining": 25,
+    "nextCheckDate": "2025-08-12",
+    "location": "Gudang H"
+  },
+  {
+    "id": "AP-D04",
+    "type": "Water - Type",
+    "weight": "8L",
+    "petugas": "Lia",
+    "status": "Trouble",
+    "daysRemaining": 4,
+    "nextCheckDate": "2025-07-19",
+    "location": "Gudang I"
+  },
+  {
+    "id": "AP-CO05",
+    "type": "CO₂ - Type",
+    "weight": "7kg",
+    "petugas": "Dina",
+    "status": "Sehat",
+    "daysRemaining": 30,
+    "nextCheckDate": "2025-09-01",
+    "location": "Gudang J"
+  },
+  {
+    "id": "AP-F05",
+    "type": "Foam - Type",
+    "weight": "6kg",
+    "petugas": "Riko",
+    "status": "Expired",
+    "daysRemaining": 0,
+    "nextCheckDate": "2025-07-02",
+    "location": "Gudang K"
+  },
+  {
+    "id": "AP-D05",
+    "type": "Water - Type",
+    "weight": "12L",
+    "petugas": "Vika",
+    "status": "Sehat",
+    "daysRemaining": 18,
+    "nextCheckDate": "2025-08-10",
+    "location": "Gudang L"
+  },
+  {
+    "id": "AP-CO06",
+    "type": "CO₂ - Type",
+    "weight": "6.5kg",
+    "petugas": "Wawan",
+    "status": "Trouble",
+    "daysRemaining": 2,
+    "nextCheckDate": "2025-07-17",
+    "location": "Gudang M"
+  },
+  {
+    "id": "AP-F06",
+    "type": "Foam - Type",
+    "weight": "5kg",
+    "petugas": "Sari",
+    "status": "Sehat",
+    "daysRemaining": 22,
+    "nextCheckDate": "2025-08-08",
+    "location": "Gudang A"
+  },
+  {
+    "id": "AP-D06",
+    "type": "Water - Type",
+    "weight": "9.5L",
+    "petugas": "Nita",
+    "status": "Expired",
+    "daysRemaining": 0,
+    "nextCheckDate": "2025-06-30",
+    "location": "Gudang B"
+  },
+  {
+    "id": "AP-CO07",
+    "type": "CO₂ - Type",
+    "weight": "5kg",
+    "petugas": "Rudi",
+    "status": "Sehat",
+    "daysRemaining": 28,
+    "nextCheckDate": "2025-08-18",
+    "location": "Gudang C"
+  },
+  {
+    "id": "AP-F07",
+    "type": "Foam - Type",
+    "weight": "4.5kg",
+    "petugas": "Tommy",
+    "status": "Trouble",
+    "daysRemaining": 1,
+    "nextCheckDate": "2025-07-16",
+    "location": "Gudang D"
+  },
+  {
+    "id": "AP-D07",
+    "type": "Water - Type",
+    "weight": "11L",
+    "petugas": "Fajar",
+    "status": "Sehat",
+    "daysRemaining": 16,
+    "nextCheckDate": "2025-08-02",
+    "location": "Gudang E"
+  },
+  {
+    "id": "AP-CO08",
+    "type": "CO₂ - Type",
+    "weight": "6kg",
+    "petugas": "Hendri",
+    "status": "Expired",
+    "daysRemaining": 0,
+    "nextCheckDate": "2025-07-03",
+    "location": "Gudang F"
+  },
+  {
+    "id": "AP-F08",
+    "type": "Foam - Type",
+    "weight": "5.5kg",
+    "petugas": "Maya",
+    "status": "Sehat",
+    "daysRemaining": 24,
+    "nextCheckDate": "2025-08-20",
+    "location": "Gudang G"
+  },
+  {
+    "id": "AP-D08",
+    "type": "Water - Type",
+    "weight": "10L",
+    "petugas": "Siska",
+    "status": "Trouble",
+    "daysRemaining": 6,
+    "nextCheckDate": "2025-07-21",
+    "location": "Gudang H"
+  },
+  {
+    "id": "AP-CO09",
+    "type": "CO₂ - Type",
+    "weight": "7.5kg",
+    "petugas": "Lili",
+    "status": "Sehat",
+    "daysRemaining": 32,
+    "nextCheckDate": "2025-09-05",
+    "location": "Gudang I"
+  },
+  {
+    "id": "AP-F09",
+    "type": "Foam - Type",
+    "weight": "3.5kg",
+    "petugas": "Beni",
+    "status": "Trouble",
+    "daysRemaining": 4,
+    "nextCheckDate": "2025-07-23",
+    "location": "Gudang J"
+  }
+]

@@ -1,0 +1,217 @@
+// app/(tabs)/AparChecklist.tsx
+
+import React, { useEffect, useState } from 'react';
+import { Platform, SafeAreaView, ScrollView, Text, View, Image } from 'react-native';
+import { useRouter } from 'expo-router';
+import Constants from 'expo-constants';
+import * as ImagePicker from 'expo-image-picker';
+import { Picker } from '@react-native-picker/picker';
+import { Ionicons } from '@expo/vector-icons';
+import styled from 'styled-components/native';
+
+// --- Warna & Dimensi Sesuai Branding APAR ---
+const Colors = {
+  primary: '#D50000',      // Merah APAR
+  background: '#FFFFFF',
+  text: '#212121',
+  subtext: '#616161',
+  border: '#ECECEC',
+  inputBg: '#F5F5F5',
+};
+
+// --- Styled Components ---
+const Container = styled(SafeAreaView)`
+  flex: 1;
+  background-color: ${Colors.background};
+`;
+
+const Header = styled.View`
+  width: 100%;
+  padding-top: ${Constants.statusBarHeight + 16}px;
+  padding-bottom: 16px;
+  padding-horizontal: 16px;
+  background-color: ${Colors.primary};
+  flex-direction: row;
+  align-items: center;
+`;
+
+const Logo = styled(Image)`
+  width: 40px;
+  height: 40px;
+  margin-right: 12px;
+`;
+
+const HeaderText = styled.View`
+  flex: 1;
+`;
+
+const Title = styled.Text`
+  color: #fff;
+  font-size: 20px;
+  font-weight: bold;
+`;
+
+const Subtitle = styled.Text`
+  color: #fff;
+  font-size: 14px;
+  margin-top: 4px;
+`;
+
+const Content = styled(ScrollView)`
+  flex: 1;
+  padding: 16px;
+`;
+
+const CheckItemRow = styled(View)`
+  flex-direction: row;
+  align-items: center;
+  padding-vertical: 12px;
+  border-bottom-width: 1px;
+  border-bottom-color: ${Colors.border};
+`;
+
+const CheckLabel = styled(Text)`
+  flex: 1;
+  font-size: 16px;
+  color: ${Colors.text};
+  margin-left: 12px;
+`;
+
+// Wrap Picker supaya bisa di-style
+const DropdownContainer = styled(View)`
+  width: 160px;
+  background-color: ${Colors.inputBg};
+  border-radius: 4px;
+  border: 1px solid ${Colors.border};
+`;
+
+const StyledPicker = styled(Picker)`
+  height: 40px;
+`;
+
+const Button = styled.Pressable`
+  background-color: ${Colors.primary};
+  padding: 12px;
+  border-radius: 8px;
+  align-items: center;
+  margin-vertical: 16px;
+`;
+
+const ButtonText = styled(Text)`
+  color: #fff;
+  font-size: 16px;
+  font-weight: 600;
+`;
+
+const PreviewImage = styled.Image`
+  width: 100%;
+  height: 200px;
+  border-radius: 8px;
+  margin-top: 8px;
+  background-color: ${Colors.border};
+`;
+
+// --- Komponen Utama ---
+export default function AparChecklist() {
+  const router = useRouter();
+
+  // Daftar poin pengecekan
+  const checklistItems = [
+    { id: 'seal', label: 'Segel Tabung' },
+    { id: 'pressure', label: 'Tekanan Indikator' },
+    { id: 'hose', label: 'Selang & Nozzle' },
+    { id: 'label', label: 'Tanggal Kedaluwarsa' },
+    { id: 'bracket', label: 'Mounting Bracket' },
+  ];
+
+  // State untuk status tiap item: '' | 'baik' | 'servis' | 'hilang'
+  const [status, setStatus] = useState<Record<string, string>>(
+    checklistItems.reduce((acc, item) => ({ ...acc, [item.id]: '' }), {})
+  );
+  const [imageUri, setImageUri] = useState<string | null>(null);
+
+  // Minta izin ke galeri
+  useEffect(() => {
+    (async () => {
+      if (Platform.OS !== 'web') {
+        const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+        if (status !== 'granted') {
+          alert('Butuh izin akses foto untuk upload kondisi APAR.');
+        }
+      }
+    })();
+  }, []);
+
+  const handleSelect = (id: string, value: string) => {
+    setStatus(prev => ({ ...prev, [id]: value }));
+  };
+
+  const pickImage = async () => {
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      quality: 0.7,
+    });
+    if (!result.cancelled) setImageUri(result.uri);
+  };
+
+  const handleSubmit = () => {
+    // TODO: Kirim `status` dan `imageUri` ke backend
+    console.log('Checklist terkirim:', status, 'Foto:', imageUri);
+    router.back();
+  };
+
+  return (
+    <Container>
+      <Header>
+        <Logo source={require('@/assets/apar-logo.png')} resizeMode="contain" />
+        <HeaderText>
+          <Title>Maintenance APAR</Title>
+          <Subtitle>Isi checklist dan upload foto</Subtitle>
+        </HeaderText>
+      </Header>
+
+      <Content>
+        {checklistItems.map(item => (
+          <CheckItemRow key={item.id}>
+            <Ionicons
+              name="shield-checkmark"
+              size={24}
+              color={status[item.id] === 'baik' ? '#4CAF50' : Colors.subtext}
+            />
+            <CheckLabel>{item.label}</CheckLabel>
+            <DropdownContainer>
+              <StyledPicker
+                selectedValue={status[item.id]}
+                onValueChange={val => handleSelect(item.id, val)}
+                mode="dropdown"
+              >
+                <Picker.Item label="Pilih status" value="" />
+                <Picker.Item label="Baik" value="baik" />
+                <Picker.Item label="Butuh Servis" value="servis" />
+                <Picker.Item label="Tidak Ada" value="hilang" />
+              </StyledPicker>
+            </DropdownContainer>
+          </CheckItemRow>
+        ))}
+
+        {/* Upload Foto */}
+        <View style={{ marginTop: 24 }}>
+          <Text style={{ fontSize: 16, color: Colors.text, marginBottom: 8 }}>
+            Foto Kondisi APAR
+          </Text>
+          <Button onPress={pickImage}>
+            <ButtonText>Pilih Foto</ButtonText>
+          </Button>
+          {imageUri && (
+            <PreviewImage source={{ uri: imageUri }} resizeMode="cover" />
+          )}
+        </View>
+
+        {/* Tombol Kirim */}
+        <Button onPress={handleSubmit}>
+          <ButtonText>Kirim Checklist</ButtonText>
+        </Button>
+      </Content>
+    </Container>
+  );
+}

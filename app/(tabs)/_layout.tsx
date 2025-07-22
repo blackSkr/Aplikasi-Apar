@@ -1,45 +1,138 @@
-import { Tabs } from 'expo-router';
-import React from 'react';
-import { Platform } from 'react-native';
-
+// app/(tabs)/_layout.tsx
 import { HapticTab } from '@/components/HapticTab';
 import { IconSymbol } from '@/components/ui/IconSymbol';
 import TabBarBackground from '@/components/ui/TabBarBackground';
-import { Colors } from '@/constants/Colors';
 import { useColorScheme } from '@/hooks/useColorScheme';
+import { Tabs } from 'expo-router';
+import React from 'react';
+import { Platform, StyleSheet, TouchableOpacity, View } from 'react-native';
 
-export default function TabLayout() {
+export default function TabsLayout() {
   const colorScheme = useColorScheme();
 
   return (
     <Tabs
       screenOptions={{
-        tabBarActiveTintColor: Colors[colorScheme ?? 'light'].tint,
         headerShown: false,
-        tabBarButton: HapticTab,
+        tabBarActiveTintColor: '#D50000',
+        tabBarInactiveTintColor: '#757575',
         tabBarBackground: TabBarBackground,
-        tabBarStyle: Platform.select({
-          ios: {
-            // Use a transparent background on iOS to show the blur effect
-            position: 'absolute',
-          },
-          default: {},
-        }),
-      }}>
+        tabBarStyle: {
+          height: 70,
+          paddingBottom: 10,
+          ...Platform.select({ ios: { position: 'absolute' } }),
+        },
+        tabBarButton: HapticTab,
+      }}
+    >
       <Tabs.Screen
         name="index"
         options={{
           title: 'Home',
-          tabBarIcon: ({ color }) => <IconSymbol size={28} name="house.fill" color={color} />,
+          tabBarIcon: ({ focused }) => (
+            <IconSymbol
+              name="house.fill"
+              size={28}
+              color={focused ? '#D50000' : '#757575'}
+            />
+          ),
         }}
       />
+
       <Tabs.Screen
-        name="explore"
+        name="ScanQr"
         options={{
-          title: 'Explore',
-          tabBarIcon: ({ color }) => <IconSymbol size={28} name="paperplane.fill" color={color} />,
+          title: 'Scan QR',
+          tabBarButton: props => <QrTabButton {...props} />,
+          tabBarIcon: ({ focused }) => (
+            <IconSymbol
+              name="qrcode"
+              size={32}
+              color={focused ? '#D50000' : '#757575'}
+            />
+          ),
+        }}
+      />
+
+      <Tabs.Screen
+        name="InformasiPetugas"
+        options={{
+          title: 'Informasi',
+          tabBarIcon: ({ focused }) => (
+            <IconSymbol
+              name="info.circle.fill"
+              size={28}
+              color={focused ? '#D50000' : '#757575'}
+            />
+          ),
+        }}
+      />
+
+      <Tabs.Screen
+        name="DaftarDataPetugas"
+        options={{
+          title: 'Daftar Petugas',
+          tabBarIcon: ({ focused }) => (
+            <IconSymbol
+              name="list.bullet"
+              size={28}
+              color={focused ? '#D50000' : '#757575'}
+            />
+          ),
         }}
       />
     </Tabs>
   );
 }
+
+type QrTabButtonProps = TouchableOpacity['props'] & {
+  accessibilityState?: { selected?: boolean };
+};
+
+function QrTabButton({
+  accessibilityState = {},
+  style,
+  children,
+  onPress,
+  ...rest
+}: QrTabButtonProps) {
+  const focused = accessibilityState.selected ?? false;
+  return (
+    <TouchableOpacity
+      onPress={onPress}
+      style={[styles.qrButtonContainer, style]}
+      activeOpacity={0.8}
+      {...rest}
+    >
+      <View style={[styles.qrButton, focused && styles.qrButtonFocused]}>
+        {children}
+      </View>
+    </TouchableOpacity>
+  );
+}
+
+const styles = StyleSheet.create({
+  qrButtonContainer: {
+    top: -20,
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  qrButton: {
+    width: 70,
+    height: 70,
+    borderRadius: 35,
+    backgroundColor: '#fff',
+    justifyContent: 'center',
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.1,
+    shadowRadius: 6,
+    elevation: 8,
+  },
+  qrButtonFocused: {
+    borderWidth: 2,
+    borderColor: '#D50000',
+  },
+});

@@ -19,10 +19,8 @@ import QRCodeSVG from 'react-native-qrcode-svg';
 import { captureRef } from 'react-native-view-shot';
 import styled from 'styled-components/native';
 
-const API_BASE =
-  Platform.OS === 'android'
-    ? 'http://10.0.2.2:3000/api'
-    : 'http://localhost:3000/api';
+// gunakan IP yang sama dengan CRUDAparTest
+const API_BASE = 'http://192.168.245.1:3000/api';
 
 const Colors = {
   primary: '#D50000',
@@ -145,11 +143,8 @@ export default function EditApar() {
   const router = useRouter();
   const { id_apar } = useLocalSearchParams<{ id_apar: string }>();
 
-  // Untuk GET gunakan id_apar yang datang dari param,
-  // tapi yang dikirim ulang di body adalah idApar (bisa diubah).
   const [origId] = useState(id_apar);
   const [idApar, setIdApar] = useState(id_apar);
-
   const [loading, setLoading] = useState(true);
   const [noApar, setNoApar] = useState('');
   const [lokasi, setLokasi] = useState('');
@@ -160,10 +155,8 @@ export default function EditApar() {
   const [tglMaint, setTglMaint] = useState('');
   const [interval, setInterval] = useState('');
   const [keterangan, setKeterangan] = useState('');
-
   const [showExpPicker, setShowExpPicker] = useState(false);
   const [showMaintPicker, setShowMaintPicker] = useState(false);
-
   const qrContainerRef = useRef<View>(null);
 
   useEffect(() => {
@@ -173,7 +166,6 @@ export default function EditApar() {
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const data = await res.json();
 
-        // isi field
         setIdApar(data.id_apar);
         setNoApar(data.no_apar);
         setLokasi(data.lokasi_apar);
@@ -184,16 +176,13 @@ export default function EditApar() {
         setInterval(data.interval_maintenance.toString());
         setKeterangan(data.keterangan ?? '');
 
-        // parsing keperluan_check: coba JSON, fallback semicolon
         const raw = data.keperluan_check as string;
         let list: string[] = [];
         try {
           const parsed = JSON.parse(raw);
           if (Array.isArray(parsed) && parsed.every(i => typeof i === 'string')) {
             list = parsed;
-          } else {
-            throw new Error();
-          }
+          } else throw new Error();
         } catch {
           list = raw.split('; ').filter(s => s.trim() !== '');
         }
@@ -233,26 +222,30 @@ export default function EditApar() {
       );
     }
 
-    try {
-      const payload = {
-        id_apar: idApar,
-        no_apar: noApar,
-        lokasi_apar: lokasi,
-        jenis_apar: jenis,
-        keperluan_check: JSON.stringify(checklist.filter(s => s.trim())),
-        qr_code_apar: idApar,
-        status_apar: status,
-        tgl_exp: tglExp,
-        tgl_terakhir_maintenance: tglMaint,
-        interval_maintenance: parseInt(interval, 10),
-        keterangan,
-      };
+    const payload = {
+      id_apar: idApar,
+      no_apar: noApar,
+      lokasi_apar: lokasi,
+      jenis_apar: jenis,
+      keperluan_check: JSON.stringify(checklist.filter(s => s.trim())),
+      qr_code_apar: idApar,
+      status_apar: status,
+      tgl_exp: tglExp,
+      tgl_terakhir_maintenance: tglMaint,
+      interval_maintenance: parseInt(interval, 10),
+      keterangan,
+    };
 
-      const res = await fetch(`${API_BASE}/apar`, {
+    console.log('🛠 PUT->', `${API_BASE}/apar/${origId}`);
+    console.log('   payload:', payload);
+
+    try {
+      const res = await fetch(`${API_BASE}/apar/${origId}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
       });
+      console.log('   response status:', res.status);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
 
       Alert.alert('Sukses', 'Data APAR berhasil diupdate.', [
@@ -262,6 +255,7 @@ export default function EditApar() {
         },
       ]);
     } catch (e: any) {
+      console.error('🛠 PUT error:', e);
       Alert.alert('Error menyimpan', e.message);
     }
   };
@@ -310,7 +304,6 @@ export default function EditApar() {
         <HeaderTitle>Edit APAR</HeaderTitle>
       </Header>
       <Form>
-        {/* Identitas */}
         <Section>
           <SectionTitle>Identitas APAR</SectionTitle>
           <FieldLabel>ID APAR</FieldLabel>
@@ -325,7 +318,6 @@ export default function EditApar() {
           </SecondaryButton>
         </Section>
 
-        {/* Detail */}
         <Section>
           <SectionTitle>Detail APAR</SectionTitle>
           <FieldLabel>No. APAR</FieldLabel>
@@ -338,7 +330,6 @@ export default function EditApar() {
           <FieldInput value={status} onChangeText={setStatus} />
         </Section>
 
-        {/* Checklist */}
         <Section>
           <SectionTitle>Checklist Kondisi</SectionTitle>
           {checklist.map((it, i) => (
@@ -360,7 +351,6 @@ export default function EditApar() {
           </SecondaryButton>
         </Section>
 
-        {/* Waktu & Interval */}
         <Section>
           <SectionTitle>Waktu & Interval</SectionTitle>
           <FieldLabel>Exp. Date</FieldLabel>
@@ -381,7 +371,6 @@ export default function EditApar() {
           />
         </Section>
 
-        {/* Keterangan */}
         <Section>
           <SectionTitle>Keterangan</SectionTitle>
           <FieldInput

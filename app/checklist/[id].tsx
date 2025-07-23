@@ -1,6 +1,4 @@
-import Colors from '@/constants/Colors';
-import { Ionicons } from '@expo/vector-icons';
-import { useLocalSearchParams } from 'expo-router';
+// app/checklist/[id].tsx
 import React, { useEffect, useState } from 'react';
 import {
   ActivityIndicator,
@@ -9,51 +7,98 @@ import {
   StatusBar,
   Text,
   View,
+  Platform,
 } from 'react-native';
+import { useLocalSearchParams } from 'expo-router';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import NetInfo from '@react-native-community/netinfo';
+import { Ionicons } from '@expo/vector-icons';
 import styled from 'styled-components/native';
+import Colors from '@/constants/Colors';
+import { AparRaw } from '@/hooks/useAparList';
 
-const BASE_URL = 'http://172.20.10.5:3000'; // sesuaikan IP/backend-mu
+// kunci cache sama dengan useAparList
+const CACHE_KEY = 'APAR_CACHE';
+// pakai baseUrl yang sama
+const BASE_URL =
+  Platform.OS === 'android' ? 'http://10.0.2.2:3000' : 'http://localhost:3000';
 
-const ChecklistDetail: React.FC = () => {
+export default function ChecklistDetail() {
   const { id } = useLocalSearchParams<{ id: string }>();
-  const [apar, setApar] = useState<any>(null);
+  const [apar, setApar] = useState<AparRaw | null>(null);
   const [checks, setChecks] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [isConnected, setIsConnected] = useState(true);
 
   useEffect(() => {
-    if (!id) {
-      setError('ID APAR tidak tersedia');
-      setLoading(false);
-      return;
-    }
     (async () => {
-      try {
-        const res = await fetch(`${BASE_URL}/api/apar/${id}`);
-        if (res.status === 404) throw new Error('Data tidak ditemukan');
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        const data = await res.json();
-        setApar(data);
+      if (!id) {
+        setError('ID APAR tidak tersedia');
+        setLoading(false);
+        return;
+      }
 
-        // parsing keperluan_check
-        let arr: string[] = [];
-        const raw = data.keperluan_check;
-        if (typeof raw === 'string') {
-          try {
-            const parsed = JSON.parse(raw);
-            if (Array.isArray(parsed)) arr = parsed;
-          } catch {
-            arr = raw.split(',').map((s: string) => s.trim()).filter(Boolean);
+      const net = await NetInfo.fetch();
+      setIsConnected(net.isConnected === true);
+
+      if (net.isConnected) {
+        // online: fetch dari server
+        try {
+          const res = await fetch(`${BASE_URL}/api/apar/${id}`);
+          if (res.status === 404) throw new Error('Data tidak ditemukan');
+          if (!res.ok) throw new Error(`HTTP ${res.status}`);
+          const data: AparRaw = await res.json();
+          setApar(data);
+
+          // update cache list
+          const raw = await AsyncStorage.getItem(CACHE_KEY);
+          const arr: AparRaw[] = raw ? JSON.parse(raw) : [];
+          const idx = arr.findIndex(x => x.id_apar === id);
+          if (idx >= 0) arr[idx] = data;
+          else arr.push(data);
+          await AsyncStorage.setItem(CACHE_KEY, JSON.stringify(arr));
+        } catch (e: any) {
+          setError(e.message);
+        }
+      } else {
+        // offline: baca dari cache
+        const raw = await AsyncStorage.getItem(CACHE_KEY);
+        if (raw) {
+          const arr: AparRaw[] = JSON.parse(raw);
+          const found = arr.find(x => x.id_apar === id) ?? null;
+          if (found) {
+            setApar(found);
+          } else {
+            setError('Data tidak tersedia di cache');
           }
-        } else if (Array.isArray(raw)) {
-          arr = raw;
+        } else {
+          setError('Tidak ada data cache. Nyalakan koneksi.');
+        }
+      }
+
+      // parsing keperluan_check
+      if (apar) {
+        const rawCheck = apar.keperluan_check;
+        let arr: string[] = [];
+        if (typeof rawCheck === 'string') {
+          try {
+            const parsed = JSON.parse(rawCheck);
+            if (Array.isArray(parsed)) arr = parsed;
+            else arr = [];
+          } catch {
+            arr = rawCheck
+              .split(';')
+              .map(s => s.trim())
+              .filter(Boolean);
+          }
+        } else if (Array.isArray(rawCheck)) {
+          arr = rawCheck;
         }
         setChecks(arr);
-      } catch (e: any) {
-        setError(e.message);
-      } finally {
-        setLoading(false);
       }
+
+      setLoading(false);
     })();
   }, [id]);
 
@@ -71,105 +116,117 @@ const ChecklistDetail: React.FC = () => {
       </Center>
     );
   }
+  if (!apar) {
+    return null;
+  }
 
   return (
     <SafeArea>
-      <StatusBar barStyle="light-content" backgroundColor={Colors.primaryheader} />
-
+      <StatusBar
+        barStyle="light-content"
+        backgroundColor={Colors.primaryheader}
+      />
+      {!isConnected && (
+        <Banner>
+          <BannerText>OFFLINE: Menampilkan data cache</BannerText>
+        </Banner>
+      )}
       <Header>
         <HeaderTitle>Detail APAR</HeaderTitle>
       </Header>
-
       <ScrollView contentContainerStyle={{ padding: 24 }}>
-        {/* Section Utama */}
+        {/* Identitas */}
         <Card>
-          <FieldRow>
+          <Row>
             <Label>ID APAR</Label>
             <Value>{apar.id_apar}</Value>
-          </FieldRow>
-          <FieldRow>
+          </Row>
+          <Row>
             <Label>No APAR</Label>
             <Value>{apar.no_apar}</Value>
-          </FieldRow>
-          <FieldRow>
+          </Row>
+          <Row>
             <Label>Lokasi</Label>
             <Value>{apar.lokasi_apar}</Value>
-          </FieldRow>
-          <FieldRow>
+          </Row>
+          <Row>
             <Label>Jenis</Label>
             <Value>{apar.jenis_apar}</Value>
-          </FieldRow>
+          </Row>
         </Card>
-
         {/* Keperluan Check */}
         <Card>
           <SectionTitle>Keperluan Check</SectionTitle>
           {checks.length > 0 ? (
-            checks.map((item, idx) => (
-              <CheckRow key={idx}>
-                <Ionicons name="checkmark-circle" size={20} color={Colors.primary} />
-                <CheckText>{item}</CheckText>
+            checks.map((it, i) => (
+              <CheckRow key={i}>
+                <Ionicons
+                  name="checkmark-circle"
+                  size={20}
+                  color={Colors.primary}
+                />
+                <CheckText>{it}</CheckText>
               </CheckRow>
             ))
           ) : (
             <NoData>(tidak ada data)</NoData>
           )}
         </Card>
-
         {/* Status & Exp */}
         <Card>
-          <FieldRow>
+          <Row>
             <Label>Status</Label>
-            <StatusBadge status={apar.status_apar}>
+            <Badge status={apar.status_apar}>
               {apar.status_apar}
-            </StatusBadge>
-          </FieldRow>
-          <FieldRow>
+            </Badge>
+          </Row>
+          <Row>
             <Label>Exp Date</Label>
-            <Value>{new Date(apar.tgl_exp).toLocaleDateString()}</Value>
-          </FieldRow>
+            <Value>
+              {new Date(apar.tgl_exp).toLocaleDateString()}
+            </Value>
+          </Row>
         </Card>
       </ScrollView>
     </SafeArea>
   );
-};
+}
 
-export default ChecklistDetail;
-
+// styled components
 const SafeArea = styled(SafeAreaView)`
   flex: 1;
   background-color: ${Colors.background};
 `;
-
+const Banner = styled.View`
+  background-color: ${Colors.warning};
+  padding: 8px;
+  align-items: center;
+`;
+const BannerText = styled.Text`
+  color: #fff;
+  font-weight: bold;
+`;
 const Header = styled(View)`
   height: 56px;
   background-color: ${Colors.primaryheader};
   justify-content: center;
   align-items: center;
   elevation: 4;
-  shadow-color: #000;
-  shadow-opacity: 0.1;
-  shadow-offset: 0 2px;
-  shadow-radius: 4px;
 `;
-
-const HeaderTitle = styled(Text)`
+const HeaderTitle = styled.Text`
   color: #fff;
   font-size: 20px;
   font-weight: bold;
 `;
-
 const Center = styled(View)`
   flex: 1;
   justify-content: center;
   align-items: center;
 `;
-
-const ErrorText = styled(Text)`
+const ErrorText = styled.Text`
   color: red;
   font-size: 16px;
 `;
-
 const Card = styled(View)`
   background-color: ${Colors.background};
   border-radius: 8px;
@@ -177,57 +234,50 @@ const Card = styled(View)`
   margin-bottom: 16px;
   border: 1px solid ${Colors.border};
 `;
-
-const FieldRow = styled(View)`
+const Row = styled(View)`
   flex-direction: row;
   justify-content: space-between;
   margin-bottom: 12px;
 `;
-
-const Label = styled(Text)`
+const Label = styled.Text`
   color: ${Colors.subtext};
   font-size: 14px;
   font-weight: 600;
 `;
-
-const Value = styled(Text)`
+const Value = styled.Text`
   color: ${Colors.text};
   font-size: 14px;
   flex-shrink: 1;
   text-align: right;
 `;
-
-const SectionTitle = styled(Text)`
+const SectionTitle = styled.Text`
   font-size: 16px;
   font-weight: bold;
   color: ${Colors.text};
   margin-bottom: 12px;
 `;
-
 const CheckRow = styled(View)`
   flex-direction: row;
   align-items: center;
   margin-bottom: 8px;
 `;
-
-const CheckText = styled(Text)`
+const CheckText = styled.Text`
   margin-left: 8px;
   color: ${Colors.text};
   font-size: 14px;
 `;
-
-const NoData = styled(Text)`
+const NoData = styled.Text`
   color: ${Colors.subtext};
   font-size: 14px;
   font-style: italic;
 `;
-
-const StatusBadge = styled(Text)<{ status: string }>`
+const Badge = styled.Text<{ status: string }>`
   padding: 4px 8px;
   border-radius: 12px;
   font-size: 12px;
   font-weight: bold;
   color: #fff;
   background-color: ${({ status }) =>
-    Colors.badge[status as keyof typeof Colors.badge] || Colors.primaryLight};
+    Colors.badge[status as keyof typeof Colors.badge] ||
+    Colors.primaryLight};
 `;

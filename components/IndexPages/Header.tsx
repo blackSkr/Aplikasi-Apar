@@ -6,9 +6,8 @@ import { Ionicons } from '@expo/vector-icons';
 import Constants from 'expo-constants';
 import { LinearGradient } from 'expo-linear-gradient';
 import Colors from '@/constants/Colors';
-// pastikan kamu sudah install package:
-//   expo install @react-native-community/netinfo
 import { useNetInfo } from '@react-native-community/netinfo';
+import { useBadge } from '@/context/BadgeContext';
 
 const HeaderContainer = styled(LinearGradient).attrs({
   colors: [Colors.primaryheader, Colors.primaryLight],
@@ -93,9 +92,7 @@ const TimeText = styled.Text`
 `;
 
 type HeaderProps = {
-  /**
-   * Dipanggil saat user menekan tombol Logout.
-   */
+  /** Dipanggil saat user menekan tombol Logout. */
   onLogout: (e: GestureResponderEvent) => void;
 };
 
@@ -103,6 +100,7 @@ const Header: FC<HeaderProps> = ({ onLogout }) => {
   const [now, setNow] = useState(new Date());
   const netInfo = useNetInfo();
   const isConnected = netInfo.isConnected;
+  const { badgeNumber } = useBadge();
 
   // Update waktu setiap detik
   useEffect(() => {
@@ -110,6 +108,7 @@ const Header: FC<HeaderProps> = ({ onLogout }) => {
     return () => clearInterval(timer);
   }, []);
 
+  // Format tanggal & waktu
   const dateStr = now.toLocaleDateString('id-ID', {
     weekday: 'short',
     day: 'numeric',
@@ -121,6 +120,18 @@ const Header: FC<HeaderProps> = ({ onLogout }) => {
     minute: '2-digit',
     second: '2-digit',
   });
+
+  // Sapaan profesional berdasarkan jam
+  const hour = now.getHours();
+  let greeting = 'Halo';
+  if (hour < 12) greeting = 'Selamat pagi';
+  else if (hour < 15) greeting = 'Selamat siang';
+  else if (hour < 18) greeting = 'Selamat sore';
+  else greeting = 'Selamat malam';
+
+  const subtitle = badgeNumber
+    ? `${greeting}, ${badgeNumber}!`
+    : `${greeting}!`;
 
   return (
     <HeaderContainer>
@@ -134,7 +145,7 @@ const Header: FC<HeaderProps> = ({ onLogout }) => {
           </LogoWrapper>
           <TitleGroup>
             <TitleText>Manajemen APAR</TitleText>
-            <SubtitleText>Halo, Satria!</SubtitleText>
+            <SubtitleText>{subtitle}</SubtitleText>
           </TitleGroup>
         </LogoTitle>
 

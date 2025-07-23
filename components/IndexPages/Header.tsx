@@ -1,10 +1,14 @@
 // src/components/Header.tsx
-import Colors from '@/constants/Colors';
+import React, { FC, useEffect, useState } from 'react';
+import { GestureResponderEvent } from 'react-native';
+import styled from 'styled-components/native';
 import { Ionicons } from '@expo/vector-icons';
 import Constants from 'expo-constants';
 import { LinearGradient } from 'expo-linear-gradient';
-import React, { useEffect, useState } from 'react';
-import styled from 'styled-components/native';
+import Colors from '@/constants/Colors';
+// pastikan kamu sudah install package:
+//   expo install @react-native-community/netinfo
+import { useNetInfo } from '@react-native-community/netinfo';
 
 const HeaderContainer = styled(LinearGradient).attrs({
   colors: [Colors.primaryheader, Colors.primaryLight],
@@ -69,8 +73,10 @@ const SubtitleText = styled.Text`
   margin-top: 2px;
 `;
 
-const BellButton = styled.TouchableOpacity`
+const LogoutButton = styled.TouchableOpacity`
   padding: 8px;
+  background-color: rgba(255,255,255,0.3);
+  border-radius: 16px;
 `;
 
 const TimeRow = styled.View`
@@ -86,42 +92,23 @@ const TimeText = styled.Text`
   margin-left: 6px;
 `;
 
-/* Tambahan untuk search */
-const SearchWrapper = styled.View`
-  flex-direction: row;
-  align-items: center;
-  background-color: #fff;
-  border-radius: 8px;
-  padding: 6px 12px;
-  margin-top: 12px;
-`;
-
-const SearchInput = styled.TextInput`
-  flex: 1;
-  margin-left: 8px;
-  height: 40px;
-`;
-
 type HeaderProps = {
-  onSearchQueryChange?: (query: string) => void;
+  /**
+   * Dipanggil saat user menekan tombol Logout.
+   */
+  onLogout: (e: GestureResponderEvent) => void;
 };
 
-export default function Header({ onSearchQueryChange }: HeaderProps) {
+const Header: FC<HeaderProps> = ({ onLogout }) => {
   const [now, setNow] = useState(new Date());
-  const [searchActive, setSearchActive] = useState(false);
-  const [query, setQuery] = useState('');
+  const netInfo = useNetInfo();
+  const isConnected = netInfo.isConnected;
 
+  // Update waktu setiap detik
   useEffect(() => {
-    const t = setInterval(() => setNow(new Date()), 1000);
-    return () => clearInterval(t);
+    const timer = setInterval(() => setNow(new Date()), 1000);
+    return () => clearInterval(timer);
   }, []);
-
-  // Kirim perubahan query ke parent (opsional)
-  useEffect(() => {
-    if (onSearchQueryChange) {
-      onSearchQueryChange(query);
-    }
-  }, [query]);
 
   const dateStr = now.toLocaleDateString('id-ID', {
     weekday: 'short',
@@ -151,23 +138,10 @@ export default function Header({ onSearchQueryChange }: HeaderProps) {
           </TitleGroup>
         </LogoTitle>
 
-        <BellButton onPress={() => setSearchActive((v) => !v)}>
-          <Ionicons name="search-outline" size={24} color="#fff" />
-        </BellButton>
+        <LogoutButton onPress={onLogout} accessibilityLabel="Logout">
+          <Ionicons name="log-out-outline" size={24} color="#fff" />
+        </LogoutButton>
       </TopRow>
-
-      {/* Jika searchActive true, tampilkan TextInput */}
-      {searchActive && (
-        <SearchWrapper>
-          <Ionicons name="search-outline" size={20} color="#888" />
-          <SearchInput
-            placeholder="Masukkan Kode APAR ..."
-            value={query}
-            onChangeText={setQuery}
-            autoFocus
-          />
-        </SearchWrapper>
-      )}
 
       <TimeRow>
         <Ionicons
@@ -176,6 +150,7 @@ export default function Header({ onSearchQueryChange }: HeaderProps) {
           color="rgba(255,255,255,0.8)"
         />
         <TimeText>{dateStr}</TimeText>
+
         <Ionicons
           name="time-outline"
           size={14}
@@ -183,7 +158,17 @@ export default function Header({ onSearchQueryChange }: HeaderProps) {
           style={{ marginLeft: 16 }}
         />
         <TimeText>{timeStr}</TimeText>
+
+        {/* Indikator koneksi */}
+        <Ionicons
+          name={isConnected ? 'wifi' : 'wifi-off'}
+          size={14}
+          color="rgba(255,255,255,0.8)"
+          style={{ marginLeft: 12 }}
+        />
       </TimeRow>
     </HeaderContainer>
   );
-}
+};
+
+export default Header;

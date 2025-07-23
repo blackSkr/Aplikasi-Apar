@@ -1,5 +1,10 @@
 // app/apar/CreateApar.tsx
-import React, { useState, useRef } from 'react';
+import { Picker } from '@react-native-picker/picker';
+import * as FileSystem from 'expo-file-system';
+import * as MediaLibrary from 'expo-media-library';
+import { useRouter } from 'expo-router';
+import * as Sharing from 'expo-sharing';
+import React, { useRef, useState } from 'react';
 import {
   Alert,
   Button,
@@ -12,20 +17,16 @@ import {
   TextInput,
   View,
 } from 'react-native';
-import { useRouter } from 'expo-router';
 import DateTimePickerModal from 'react-native-modal-datetime-picker';
 import QRCodeSVG from 'react-native-qrcode-svg';
 import { captureRef } from 'react-native-view-shot';
-import * as FileSystem from 'expo-file-system';
-import * as MediaLibrary from 'expo-media-library';
-import * as Sharing from 'expo-sharing';
-import { Picker } from '@react-native-picker/picker';
 import styled from 'styled-components/native';
-import { safeFetchOffline } from '../../utils/safeFetchOffline';
+import NetInfo from '@react-native-community/netinfo';
 
-// ——— Helpers —————————————————————————————————————————
+import { enqueueRequest } from '../../utils/ManajemenOffline';
+
+// Helpers
 const sanitize = (str: string) => str.replace(/<[^>]+>/g, '').trim();
-
 function validateAll(fields: {
   idApar: string;
   noApar: string;
@@ -37,125 +38,48 @@ function validateAll(fields: {
   tglMaint: string;
   interval: string;
 }) {
-  const {
-    idApar,
-    noApar,
-    lokasi,
-    jenis,
-    checklist,
-    status,
-    tglExp,
-    tglMaint,
-    interval,
-  } = fields;
-  if (!/^[A-Z0-9\-]{1,26}$/.test(idApar))
-    return 'ID APAR wajib 1–26 karakter, A–Z, 0–9 atau “-”.';
-  if (!/^[\w\s\-]{1,50}$/.test(noApar))
-    return 'No. APAR maksimal 50 karakter, huruf/angka/spasi/“-”.';
+  const { idApar, noApar, lokasi, jenis, checklist, status, tglExp, tglMaint, interval } = fields;
+  if (!/^[A-Z0-9\-]{1,26}$/.test(idApar)) return 'ID APAR wajib 1–26 karakter, A–Z, 0–9 atau “-”.';
+  if (!/^[\w\s\-]{1,50}$/.test(noApar)) return 'No. APAR maksimal 50 karakter, huruf/angka/spasi/“-”.';
   if (lokasi.length > 255) return 'Lokasi maksimal 255 karakter.';
   if (!jenis) return 'Jenis APAR harus dipilih.';
   const cleaned = checklist.map(sanitize).filter(i => i);
   if (!cleaned.length) return 'Minimal satu checklist.';
-  if (!/^(Sehat|Maintenance|Expired)$/.test(status))
-    return 'Status: Sehat, Maintenance, atau Expired.';
+  if (!/^(Sehat|Maintenance|Expired)$/.test(status)) return 'Status: Sehat, Maintenance, atau Expired.';
   if (!/^\d{4}-\d{2}-\d{2}$/.test(tglExp)) return 'Tgl Exp format YYYY-MM-DD.';
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(tglMaint))
-    return 'Tgl Maint format YYYY-MM-DD.';
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(tglMaint)) return 'Tgl Maint format YYYY-MM-DD.';
   const n = parseInt(interval, 10);
-  if (isNaN(n) || n < 1 || n > 365)
-    return 'Interval harus angka 1–365 hari.';
+  if (isNaN(n) || n < 1 || n > 365) return 'Interval harus angka 1–365 hari.';
   return null;
 }
 
-// ——— Styled Components —————————————————————————————————
-const C = {
-  primary: '#D50000',
-  bg: '#FFFFFF',
-  text: '#212121',
-  border: '#ECECEC',
-};
-const Container = styled(KeyboardAvoidingView).attrs({
-  behavior: Platform.OS === 'ios' ? 'padding' : 'height',
-})`
-  flex: 1;
-  background-color: ${C.bg};
+// Styled
+const C = { primary: '#D50000', bg: '#FFF', text: '#212121', border: '#ECECEC' };
+const Container = styled(KeyboardAvoidingView).attrs({ behavior: Platform.OS === 'ios' ? 'padding' : 'height' })`
+  flex:1; background-color:${C.bg};
 `;
-const Header = styled.View`
-  padding: 16px;
-  background-color: ${C.primary};
+const Header = styled.View`padding:16px; background-color:${C.primary};`;
+const Title = styled.Text`color:#fff; font-size:22px; font-weight:bold;`;
+const Form = styled(ScrollView)`padding:16px;`;
+const Label = styled.Text`font-size:14px; color:${C.text}; margin-bottom:4px;`;
+const Input = styled(TextInput)`border:1px solid ${C.border}; border-radius:6px; padding:10px; margin-bottom:12px;`;
+const PickerContainer = styled.View`border:1px solid ${C.border}; border-radius:6px; margin-bottom:12px; overflow:hidden;`;
+const Row = styled.View`flex-direction:row; align-items:center; margin-bottom:8px;`;
+const RemoveBtn = styled.Pressable`margin-left:8px; padding:6px; background-color:${C.primary}; border-radius:4px;`;
+const RemoveText = styled.Text`color:#fff; font-weight:bold;`;
+const AddBtn = styled.Pressable`background-color:${C.primary}; padding:12px; border-radius:8px; align-items:center; margin-bottom:16px;`;
+const AddText = styled.Text`color:#fff; font-weight:bold;`;
+const SubmitBtn = styled.Pressable<{disabled?:boolean}>`
+  background-color:${({disabled})=>disabled?C.border:C.primary};
+  padding:14px; border-radius:8px; align-items:center; margin-top:12px; margin-bottom:56px;
+  opacity:${({disabled})=>disabled?0.6:1};
 `;
-const Title = styled.Text`
-  color: #fff;
-  font-size: 22px;
-  font-weight: bold;
-`;
-const Form = styled(ScrollView)`padding: 16px;`;
-const Label = styled.Text`
-  font-size: 14px;
-  color: ${C.text};
-  margin-bottom: 4px;
-`;
-const Input = styled(TextInput)`
-  border: 1px solid ${C.border};
-  border-radius: 6px;
-  padding: 10px;
-  margin-bottom: 12px;
-`;
-const PickerContainer = styled.View`
-  border: 1px solid ${C.border};
-  border-radius: 6px;
-  margin-bottom: 12px;
-  overflow: hidden;
-`;
-const Row = styled.View`
-  flex-direction: row;
-  align-items: center;
-  margin-bottom: 8px;
-`;
-const RemoveBtn = styled.Pressable`
-  margin-left: 8px;
-  padding: 6px;
-  background-color: ${C.primary};
-  border-radius: 4px;
-`;
-const RemoveText = styled.Text`
-  color: #fff;
-  font-weight: bold;
-`;
-const AddBtn = styled.Pressable`
-  background-color: ${C.primary};
-  padding: 12px;
-  border-radius: 8px;
-  align-items: center;
-  margin-bottom: 16px;
-`;
-const AddText = styled.Text`
-  color: #fff;
-  font-weight: bold;
-`;
-const SubmitBtn = styled.Pressable`
-  background-color: ${C.primary};
-  padding: 14px;
-  border-radius: 8px;
-  align-items: center;
-  margin-top: 12px;
-  margin-bottom: 56px;
-`;
-const SubmitText = styled.Text`
-  color: #fff;
-  font-size: 16px;
-  font-weight: bold;
-`;
+const SubmitText = styled.Text`color:#fff; font-size:16px; font-weight:bold;`;
 const QRContainer = styled(View)`
-  align-self: center;
-  padding: 16px;
-  background-color: ${C.bg};
-  border: 1px solid ${C.border};
-  border-radius: 8px;
-  margin-vertical: 16px;
+  align-self:center; padding:16px; background-color:${C.bg};
+  border:1px solid ${C.border}; border-radius:8px; margin-vertical:16px;
 `;
 
-// ——— Component ——————————————————————————————————————
 export default function CreateApar() {
   const router = useRouter();
   const [idApar, setIdApar] = useState('');
@@ -171,6 +95,7 @@ export default function CreateApar() {
   const [showExpPicker, setShowExpPicker] = useState(false);
   const [showMaintPicker, setShowMaintPicker] = useState(false);
   const qrRef = useRef<View>(null);
+  const [submitting, setSubmitting] = useState(false);
 
   const updateItem = (txt: string, i: number) => {
     const tmp = [...checklist];
@@ -178,8 +103,7 @@ export default function CreateApar() {
     setChecklist(tmp);
   };
   const addItem = () => setChecklist(prev => [...prev, '']);
-  const removeItem = (i: number) =>
-    setChecklist(prev => prev.filter((_, idx) => idx !== i));
+  const removeItem = (i: number) => setChecklist(prev => prev.filter((_, idx) => idx !== i));
 
   const handleSubmit = async () => {
     const clean = {
@@ -194,38 +118,59 @@ export default function CreateApar() {
       interval: sanitize(interval),
     };
     const err = validateAll(clean);
-    if (err) return Alert.alert('Error Validasi', err);
+    if (err) {
+      return Alert.alert('Error Validasi', err);
+    }
 
+    const url = 'http://192.168.245.1:3000/api/apar';
+    const body = {
+      id_apar: clean.idApar,
+      no_apar: clean.noApar,
+      lokasi_apar: clean.lokasi,
+      jenis_apar: clean.jenis,
+      keperluan_check: clean.checklist.filter(i => i).join('; '),
+      qr_code_apar: clean.idApar,
+      status_apar: clean.status,
+      tgl_exp: clean.tglExp,
+      tgl_terakhir_maintenance: clean.tglMaint,
+      interval_maintenance: parseInt(clean.interval, 10),
+      keterangan: ket,
+    };
+
+    setSubmitting(true);
     try {
-      const res = await safeFetchOffline(
-        'http://192.168.245.1:3000/api/apar',
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            id_apar: clean.idApar,
-            no_apar: clean.noApar,
-            lokasi_apar: clean.lokasi,
-            jenis_apar: clean.jenis,
-            keperluan_check: clean.checklist.filter(i => i).join('; '),
-            qr_code_apar: clean.idApar,
-            status_apar: clean.status,
-            tgl_exp: clean.tglExp,
-            tgl_terakhir_maintenance: clean.tglMaint,
-            interval_maintenance: parseInt(clean.interval, 10),
-            keterangan: ket,
-          }),
-        }
-      );
-      if (!res.ok) throw new Error((await res.json()).message || 'Gagal');
+      const state = await NetInfo.fetch();
+      if (!state.isConnected) {
+        // enqueue dan notify user
+        await enqueueRequest({ method: 'POST', url, body });
+        Alert.alert(
+          'Offline',
+          'Data disimpan secara lokal dan akan dikirim saat online.',
+          [{ text: 'OK', onPress: () => router.replace('/apar/ReadApar') }]
+        );
+        return;
+      }
+
+      // jika online, kirim langsung
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      if (!res.ok) {
+        const msg = (await res.json()).message || 'Gagal';
+        throw new Error(msg);
+      }
       Alert.alert('Sukses', 'APAR berhasil ditambahkan.', [
         { text: 'OK', onPress: () => router.replace('/apar/ReadApar') },
       ]);
     } catch (e: any) {
-      if (e.message === 'Offline') {
-        return Alert.alert('Offline', 'Silakan coba lagi saat online.');
+      // error server atau validasi lain
+      if (e.message !== 'Offline') {
+        Alert.alert('Error', e.message);
       }
-      Alert.alert('Error', e.message);
+    } finally {
+      setSubmitting(false);
     }
   };
 
@@ -233,16 +178,12 @@ export default function CreateApar() {
     if (!qrRef.current) return Alert.alert('Error', 'QR belum siap');
     InteractionManager.runAfterInteractions(async () => {
       try {
-        const tmp = await captureRef(qrRef, {
-          format: 'png',
-          quality: 1,
-          result: 'tmpfile',
-        });
+        const tmp = await captureRef(qrRef, { format: 'png', quality: 1, result: 'tmpfile' });
         const fn = `apar_${idApar}.png`;
         const dest = FileSystem.cacheDirectory + fn;
         await FileSystem.moveAsync({ from: tmp, to: dest });
-        const { status } = await MediaLibrary.requestPermissionsAsync();
-        if (status === 'granted') {
+        const { status: perm } = await MediaLibrary.requestPermissionsAsync();
+        if (perm === 'granted') {
           const asset = await MediaLibrary.createAssetAsync(dest);
           await MediaLibrary.createAlbumAsync('QR APAR', asset, false);
           Alert.alert('Tersimpan', fn);
@@ -260,7 +201,6 @@ export default function CreateApar() {
         <Title>Tambah APAR</Title>
       </Header>
       <Form>
-        {/* ID APAR & QR */}
         <Label>ID APAR</Label>
         <Input
           value={idApar}
@@ -272,24 +212,19 @@ export default function CreateApar() {
         {idApar.trim() !== '' && (
           <>
             <QRContainer ref={qrRef} collapsable={false}>
-              <Text style={{ fontWeight: 'bold', marginBottom: 8 }}>
-                PT. Contoh Fire Safety
-              </Text>
+              <Text style={{ fontWeight: 'bold', marginBottom: 8 }}>PT. Contoh Fire Safety</Text>
               <QRCodeSVG value={idApar} size={180} />
               <Text style={{ marginTop: 8 }}>
-                Kode APAR:{' '}
-                <Text style={{ fontWeight: 'bold' }}>{idApar}</Text>
+                Kode APAR: <Text style={{ fontWeight: 'bold' }}>{idApar}</Text>
               </Text>
             </QRContainer>
             <Button title="Download QR" onPress={saveQR} />
           </>
         )}
-
-        {/* Sisa form fields… */}
         <Label>No. APAR</Label>
-        <Input value={noApar} onChangeText={setNoApar} placeholder="50 chars max" />
+        <Input value={noApar} onChangeText={setNoApar} placeholder="50 chars max" />
         <Label>Lokasi</Label>
-        <Input value={lokasi} onChangeText={setLokasi} placeholder="255 chars max" />
+        <Input value={lokasi} onChangeText={setLokasi} placeholder="255 chars max" />
         <Label>Jenis</Label>
         <PickerContainer>
           <Picker selectedValue={jenis} onValueChange={setJenis}>
@@ -299,7 +234,6 @@ export default function CreateApar() {
             <Picker.Item label="Smoke Detector" value="smoke detector" />
           </Picker>
         </PickerContainer>
-
         <Label>Checklist Kondisi</Label>
         {checklist.map((it, i) => (
           <Row key={i}>
@@ -320,21 +254,21 @@ export default function CreateApar() {
         <AddBtn onPress={addItem}>
           <AddText>+ Tambah Checklist</AddText>
         </AddBtn>
-
         <Label>Status</Label>
-        <Input value={status} onChangeText={setStatus} placeholder="Sehat / Maintenance / Expired" />
-
-        <Label>Tgl Exp</Label>
+        <Input
+          value={status}
+          onChangeText={setStatus}
+          placeholder="Sehat / Maintenance / Expired"
+        />
+        <Label>Tgl Exp</Label>
         <Pressable onPress={() => setShowExpPicker(true)}>
           <Input value={tglExp} editable={false} placeholder="YYYY-MM-DD" />
         </Pressable>
-
-        <Label>Tgl Maint</Label>
+        <Label>Tgl Maint</Label>
         <Pressable onPress={() => setShowMaintPicker(true)}>
           <Input value={tglMaint} editable={false} placeholder="YYYY-MM-DD" />
         </Pressable>
-
-        <Label>Interval (hari)</Label>
+        <Label>Interval (hari)</Label>
         <Input
           value={interval}
           onChangeText={setInterval}
@@ -342,7 +276,6 @@ export default function CreateApar() {
           keyboardType="numeric"
           maxLength={3}
         />
-
         <Label>Keterangan (opsional)</Label>
         <Input
           value={ket}
@@ -351,8 +284,7 @@ export default function CreateApar() {
           multiline
           maxLength={500}
         />
-
-        <SubmitBtn onPress={handleSubmit}>
+        <SubmitBtn onPress={handleSubmit} disabled={submitting}>
           <SubmitText>Simpan</SubmitText>
         </SubmitBtn>
       </Form>

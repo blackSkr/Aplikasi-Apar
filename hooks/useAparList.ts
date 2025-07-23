@@ -1,6 +1,7 @@
 // src/hooks/useAparList.ts
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { Platform, Alert } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { safeFetchOffline } from '../utils/safeFetchOffline';
 
 export type APARStatus = 'Sehat' | 'Maintenance' | 'Expired';
@@ -30,6 +31,7 @@ export function useAparList() {
       ? 'http://10.0.2.2:3000'
       : 'http://localhost:3000';
   const apiUrl = `${baseUrl}/api/apar`;
+  const CACHE_KEY = 'APAR_CACHE';
 
   const [loading, setLoading] = useState(false);
   const [rawData, setRawData] = useState<AparRaw[]>([]);
@@ -42,9 +44,15 @@ export function useAparList() {
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data: AparRaw[] = await res.json();
       setRawData(data);
+      await AsyncStorage.setItem(CACHE_KEY, JSON.stringify(data));
     } catch (e: any) {
       if (e.message === 'Offline') {
-        Alert.alert('Offline', 'Tidak ada koneksi. Data tidak dapat dimuat.');
+        const cached = await AsyncStorage.getItem(CACHE_KEY);
+        if (cached) {
+          setRawData(JSON.parse(cached));
+        } else {
+          Alert.alert('Offline', 'Tidak ada cache. Nyalakan koneksi dulu.');
+        }
       } else {
         Alert.alert('Error', e.message);
       }
@@ -58,7 +66,8 @@ export function useAparList() {
   }, [load]);
 
   const list = useMemo<APAR[]>(() => {
-    const today = new Date(); today.setHours(0, 0, 0, 0);
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
     return rawData.map(item => {
       const last = new Date(item.tgl_terakhir_maintenance);
       last.setHours(0, 0, 0, 0);

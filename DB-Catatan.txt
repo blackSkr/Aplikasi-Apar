@@ -6,3 +6,4 @@ curl -X POST http://localhost:3000/api/petugas -H "Content-Type: application/jso
 
 
 adb logcat *:S ReactNative:V
+npm install @react-native-community/netinfo @react-native-async-storage/async-storage react-native-modal-datetime-picker react-native-qrcode-svg react-native-view-shot @react-native-picker/picker styled-components

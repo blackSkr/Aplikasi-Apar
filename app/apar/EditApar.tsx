@@ -151,7 +151,6 @@ export default function EditApar() {
 
   const qrRef = useRef<View>(null);
 
-  // Load existing APAR data on mount
   useEffect(() => {
     (async () => {
       try {
@@ -168,7 +167,6 @@ export default function EditApar() {
         setInterval(data.interval_maintenance.toString());
         setKeterangan(data.keterangan ?? '');
 
-        // parse checklist from JSON or semicolon list
         let items: string[] = [];
         try {
           const parsed = JSON.parse(data.keperluan_check);
@@ -193,17 +191,15 @@ export default function EditApar() {
     })();
   }, [origId]);
 
-  // Checklist handlers
-  const updateChecklistItem = (text: string, index: number) => {
+  const updateChecklistItem = (text: string, idx: number) => {
     const arr = [...checklist];
-    arr[index] = text;
+    arr[idx] = text;
     setChecklist(arr);
   };
   const addChecklistItem = () => setChecklist(prev => [...prev, '']);
-  const removeChecklistItem = (index: number) =>
-    setChecklist(prev => prev.filter((_, i) => i !== index));
+  const removeChecklistItem = (idx: number) =>
+    setChecklist(prev => prev.filter((_, i) => i !== idx));
 
-  // Save changes
   const handleSubmit = async () => {
     if (
       !noApar.trim() ||
@@ -237,10 +233,7 @@ export default function EditApar() {
         }),
       });
       Alert.alert('Sukses', 'Data APAR berhasil diperbarui.', [
-        {
-          text: 'OK',
-          onPress: () => router.back(),
-        },
+        { text: 'OK', onPress: () => router.back() },
       ]);
     } catch (e: any) {
       Alert.alert(
@@ -252,7 +245,6 @@ export default function EditApar() {
     }
   };
 
-  // Download QR code
   const handleDownloadQR = () => {
     if (!qrRef.current) {
       return Alert.alert('Error', 'QR belum siap diunduh');
@@ -296,7 +288,6 @@ export default function EditApar() {
         <HeaderTitle>Edit APAR</HeaderTitle>
       </Header>
       <Form>
-        {/* Identitas APAR */}
         <Section>
           <SectionTitle>Identitas APAR</SectionTitle>
           <FieldLabel>No. APAR</FieldLabel>
@@ -312,7 +303,6 @@ export default function EditApar() {
           </SecondaryButton>
         </Section>
 
-        {/* Detail APAR */}
         <Section>
           <SectionTitle>Detail APAR</SectionTitle>
           <FieldLabel>Lokasi</FieldLabel>
@@ -323,7 +313,6 @@ export default function EditApar() {
           <FieldInput value={status} onChangeText={setStatus} />
         </Section>
 
-        {/* Checklist Kondisi */}
         <Section>
           <SectionTitle>Checklist Kondisi</SectionTitle>
           {checklist.map((item, idx) => (
@@ -354,7 +343,6 @@ export default function EditApar() {
           </Pressable>
         </Section>
 
-        {/* Waktu & Interval */}
         <Section>
           <SectionTitle>Waktu & Interval</SectionTitle>
           <FieldLabel>Tgl Exp</FieldLabel>
@@ -369,7 +357,6 @@ export default function EditApar() {
           <FieldInput value={interval} onChangeText={setInterval} keyboardType="numeric" />
         </Section>
 
-        {/* Keterangan */}
         <Section>
           <SectionTitle>Keterangan (opsional)</SectionTitle>
           <FieldInput
@@ -380,13 +367,11 @@ export default function EditApar() {
           />
         </Section>
 
-        {/* Tombol Simpan */}
         <ButtonBase onPress={handleSubmit} disabled={loading}>
           <ButtonText>Simpan Perubahan</ButtonText>
         </ButtonBase>
       </Form>
 
-      {/* Date Pickers */}
       <DateTimePickerModal
         isVisible={showExpPicker}
         mode="date"

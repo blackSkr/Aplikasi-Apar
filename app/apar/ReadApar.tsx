@@ -1,7 +1,4 @@
 // app/apar/ReadApar.tsx
-import { APAR, useAparList } from '@/hooks/useAparList';
-import { useIsFocused } from '@react-navigation/native';
-import { useRouter } from 'expo-router';
 import React, { useEffect, useMemo } from 'react';
 import {
   ActivityIndicator,
@@ -14,6 +11,9 @@ import {
   Text,
   View,
 } from 'react-native';
+import { useRouter } from 'expo-router';
+import { useIsFocused } from '@react-navigation/native';
+import { APAR, useAparList } from '@/hooks/useAparList';
 import { safeFetchOffline } from '../../utils/safeFetchOffline';
 
 export default function ReadApar() {
@@ -21,15 +21,11 @@ export default function ReadApar() {
   const isFocused = useIsFocused();
   const { loading, list, stats, refresh } = useAparList();
 
-  // Refresh data tiap kali screen ter‑focus
   useEffect(() => {
-    if (isFocused) {
-      refresh();
-    }
+    if (isFocused) refresh();
   }, [isFocused, refresh]);
 
-  // Tampilkan item paling baru di atas
-  const displayList = useMemo(() => [...list], [list]);
+  const displayList = useMemo(() => [...list].reverse(), [list]);
 
   const baseUrl =
     Platform.OS === 'android'
@@ -82,7 +78,7 @@ export default function ReadApar() {
       <FlatList<APAR>
         data={displayList}
         keyExtractor={(item, idx) =>
-          item.id_apar?.trim() ? item.id_apar.trim() : idx.toString()
+          item.id_apar.trim() || idx.toString()
         }
         renderItem={({ item }) => (
           <View style={styles.card}>
@@ -98,10 +94,7 @@ export default function ReadApar() {
               <Pressable
                 style={[styles.btn, styles.btnEdit]}
                 onPress={() =>
-                  router.push({
-                    pathname: '/apar/EditApar',
-                    params: { id_apar: item.id_apar },
-                  })
+                  router.push({ pathname: '/apar/EditApar', params: { id_apar: item.id_apar } })
                 }
               >
                 <Text style={styles.btnText}>Edit</Text>

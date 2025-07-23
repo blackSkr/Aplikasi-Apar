@@ -1,6 +1,10 @@
-// safeFetchOffline.ts
+// src/utils/safeFetchOffline.ts
 import NetInfo from '@react-native-community/netinfo';
 
+/**
+ * Wrapper fetch yang memeriksa koneksi dulu.
+ * @throws Error('Offline') jika device tidak terhubung
+ */
 export async function safeFetchOffline(
   input: RequestInfo,
   init?: RequestInit

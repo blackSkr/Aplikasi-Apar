@@ -1,9 +1,5 @@
-// src/apar/EditApar.tsx
-
-import * as FileSystem from 'expo-file-system';
-import * as MediaLibrary from 'expo-media-library';
-import { useLocalSearchParams, useRouter } from 'expo-router';
-import React, { useEffect, useRef, useState } from 'react';
+// app/apar/EditApar.tsx
+import React, { useEffect, useState, useRef } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -13,16 +9,21 @@ import {
   Pressable,
   ScrollView,
   View,
+  Text,
+  TextInput,
 } from 'react-native';
+import { useRouter, useLocalSearchParams } from 'expo-router';
 import DateTimePickerModal from 'react-native-modal-datetime-picker';
 import QRCodeSVG from 'react-native-qrcode-svg';
 import { captureRef } from 'react-native-view-shot';
+import * as FileSystem from 'expo-file-system';
+import * as MediaLibrary from 'expo-media-library';
 import styled from 'styled-components/native';
+import { safeFetchOffline } from '../../utils/safeFetchOffline';
 
-// gunakan IP yang sama dengan CRUDAparTest
 const API_BASE = 'http://192.168.245.1:3000/api';
 
-const Colors = {
+const C = {
   primary: '#D50000',
   background: '#FAFAFA',
   card: '#FFFFFF',
@@ -32,71 +33,75 @@ const Colors = {
   secondary: '#757575',
 };
 
-// --- Styled components ---
 const Container = styled(KeyboardAvoidingView).attrs({
   behavior: Platform.OS === 'ios' ? 'padding' : 'height',
 })`
   flex: 1;
-  background-color: ${Colors.background};
+  background-color: ${C.background};
 `;
-const Header = styled.View`
-  background-color: ${Colors.primary};
-  padding: 10px 20px 20px;
+
+const Header = styled(View)`
+  background-color: ${C.primary};
+  padding: 16px;
   border-bottom-left-radius: 16px;
   border-bottom-right-radius: 16px;
 `;
-const HeaderTitle = styled.Text`
-  color: #fff;
+
+const HeaderTitle = styled(Text)`
+  color: white;
   font-size: 24px;
   font-weight: bold;
 `;
+
 const Form = styled(ScrollView)`
   flex: 1;
   padding: 20px;
 `;
-const Section = styled.View`
+
+const Section = styled(View)`
   margin-bottom: 24px;
 `;
-const SectionTitle = styled.Text`
+
+const SectionTitle = styled(Text)`
   font-size: 18px;
-  color: ${Colors.secondary};
+  color: ${C.secondary};
   margin-bottom: 8px;
   font-weight: bold;
 `;
-const FieldLabel = styled.Text`
+
+const FieldLabel = styled(Text)`
   font-size: 14px;
-  color: ${Colors.label};
+  color: ${C.label};
   margin-bottom: 4px;
 `;
-const FieldInput = styled.TextInput`
-  background-color: ${Colors.card};
-  border: 1px solid ${Colors.border};
+
+const FieldInput = styled(TextInput)`
+  background-color: ${C.card};
+  border: 1px solid ${C.border};
   border-radius: 8px;
   padding: 12px;
-  font-size: 16px;
-  color: ${Colors.text};
+  color: ${C.text};
+  margin-bottom: 12px;
 `;
-const Card = styled.View`
-  background-color: ${Colors.card};
+
+const Card = styled(View)`
+  background-color: ${C.card};
   border-radius: 12px;
   padding: 16px;
   margin-vertical: 16px;
   align-items: center;
   elevation: 3;
-  shadow-color: #000;
-  shadow-offset: 0px 2px;
-  shadow-opacity: 0.1;
-  shadow-radius: 4px;
 `;
-const QRTitle = styled.Text`
-  font-size: 18px;
+
+const QRTitle = styled(Text)`
+  font-size: 16px;
   font-weight: bold;
-  color: ${Colors.text};
-  margin-bottom: 12px;
+  color: ${C.text};
+  margin-bottom: 8px;
 `;
-const ButtonBase = styled.TouchableOpacity<{ disabled?: boolean }>`
-  background-color: ${({ disabled }) =>
-    disabled ? Colors.border : Colors.primary};
+
+const ButtonBase = styled(Pressable)<{ disabled?: boolean }>`
+  background-color: ${({ disabled }) => (disabled ? C.border : C.primary)};
   padding: 14px;
   border-radius: 8px;
   align-items: center;
@@ -104,69 +109,56 @@ const ButtonBase = styled.TouchableOpacity<{ disabled?: boolean }>`
   margin-bottom: 56px;
   opacity: ${({ disabled }) => (disabled ? 0.6 : 1)};
 `;
-const ButtonText = styled.Text`
-  color: #fff;
+
+const ButtonText = styled(Text)`
+  color: white;
   font-size: 16px;
   font-weight: bold;
 `;
-const SecondaryButton = styled.TouchableOpacity`
-  background-color: ${Colors.card};
-  border: 1px solid ${Colors.primary};
+
+const SecondaryButton = styled(Pressable)`
+  background-color: ${C.card};
+  border: 1px solid ${C.primary};
   padding: 12px;
   border-radius: 8px;
   align-items: center;
-  margin-vertical: 8px;
+  margin-bottom: 16px;
 `;
-const SecondaryText = styled.Text`
-  color: ${Colors.primary};
+
+const SecondaryText = styled(Text)`
+  color: ${C.primary};
   font-size: 16px;
   font-weight: bold;
 `;
-const Row = styled.View`
-  flex-direction: row;
-  align-items: center;
-  margin-bottom: 8px;
-`;
-const RemoveBtn = styled.TouchableOpacity`
-  margin-left: 8px;
-  padding: 6px;
-  background-color: ${Colors.primary};
-  border-radius: 4px;
-`;
-const RemoveText = styled.Text`
-  color: #fff;
-  font-weight: bold;
-`;
-// --- end Styled components ---
 
 export default function EditApar() {
   const router = useRouter();
-  const { id_apar } = useLocalSearchParams<{ id_apar: string }>();
+  const { id_apar: origId } = useLocalSearchParams<{ id_apar: string }>();
 
-  const [origId] = useState(id_apar);
-  const [idApar, setIdApar] = useState(id_apar);
   const [loading, setLoading] = useState(true);
+  const [idApar, setIdApar] = useState(origId || '');
   const [noApar, setNoApar] = useState('');
   const [lokasi, setLokasi] = useState('');
   const [jenis, setJenis] = useState('');
-  const [checklist, setChecklist] = useState<string[]>([]);
-  const [status, setStatus] = useState<'Sehat'|'Maintenance'|'Expired'|''>('');
+  const [checklist, setChecklist] = useState<string[]>(['']);
+  const [status, setStatus] = useState<'Sehat' | 'Maintenance' | 'Expired' | ''>('');
   const [tglExp, setTglExp] = useState('');
   const [tglMaint, setTglMaint] = useState('');
   const [interval, setInterval] = useState('');
   const [keterangan, setKeterangan] = useState('');
   const [showExpPicker, setShowExpPicker] = useState(false);
   const [showMaintPicker, setShowMaintPicker] = useState(false);
-  const qrContainerRef = useRef<View>(null);
 
+  const qrRef = useRef<View>(null);
+
+  // Load existing APAR data on mount
   useEffect(() => {
     (async () => {
       try {
-        const res = await fetch(`${API_BASE}/apar/${origId}`);
+        const res = await safeFetchOffline(`${API_BASE}/apar/${origId}`);
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const data = await res.json();
 
-        setIdApar(data.id_apar);
         setNoApar(data.no_apar);
         setLokasi(data.lokasi_apar);
         setJenis(data.jenis_apar);
@@ -176,37 +168,44 @@ export default function EditApar() {
         setInterval(data.interval_maintenance.toString());
         setKeterangan(data.keterangan ?? '');
 
-        const raw = data.keperluan_check as string;
-        let list: string[] = [];
+        // parse checklist from JSON or semicolon list
+        let items: string[] = [];
         try {
-          const parsed = JSON.parse(raw);
-          if (Array.isArray(parsed) && parsed.every(i => typeof i === 'string')) {
-            list = parsed;
-          } else throw new Error();
+          const parsed = JSON.parse(data.keperluan_check);
+          if (Array.isArray(parsed)) items = parsed;
         } catch {
-          list = raw.split('; ').filter(s => s.trim() !== '');
+          items = data.keperluan_check
+            .split(';')
+            .map((s: string) => s.trim())
+            .filter((s: string) => s);
         }
-        setChecklist(list.length ? list : ['']);
+        setChecklist(items.length ? items : ['']);
       } catch (e: any) {
-        Alert.alert('Error memuat data', e.message);
+        Alert.alert(
+          e.message === 'Offline' ? 'Offline' : 'Error memuat data',
+          e.message === 'Offline'
+            ? 'Tidak dapat memuat saat offline.'
+            : e.message
+        );
       } finally {
         setLoading(false);
       }
     })();
   }, [origId]);
 
-  const updateItem = (txt: string, idx: number) => {
-    const tmp = [...checklist];
-    tmp[idx] = txt;
-    setChecklist(tmp);
+  // Checklist handlers
+  const updateChecklistItem = (text: string, index: number) => {
+    const arr = [...checklist];
+    arr[index] = text;
+    setChecklist(arr);
   };
-  const addItem = () => setChecklist(prev => [...prev, '']);
-  const removeItem = (idx: number) =>
-    setChecklist(prev => prev.filter((_, i) => i !== idx));
+  const addChecklistItem = () => setChecklist(prev => [...prev, '']);
+  const removeChecklistItem = (index: number) =>
+    setChecklist(prev => prev.filter((_, i) => i !== index));
 
+  // Save changes
   const handleSubmit = async () => {
     if (
-      !idApar.trim() ||
       !noApar.trim() ||
       !lokasi.trim() ||
       !jenis.trim() ||
@@ -214,78 +213,71 @@ export default function EditApar() {
       !tglExp.trim() ||
       !tglMaint.trim() ||
       !interval.trim() ||
-      checklist.every(it => !it.trim())
+      checklist.every(i => !i.trim())
     ) {
-      return Alert.alert(
-        'Error',
-        'Mohon lengkapi semua field dan minimal satu checklist.'
-      );
+      return Alert.alert('Error', 'Lengkapi semua field sebelum menyimpan.');
     }
 
-    const payload = {
-      id_apar: idApar,
-      no_apar: noApar,
-      lokasi_apar: lokasi,
-      jenis_apar: jenis,
-      keperluan_check: JSON.stringify(checklist.filter(s => s.trim())),
-      qr_code_apar: idApar,
-      status_apar: status,
-      tgl_exp: tglExp,
-      tgl_terakhir_maintenance: tglMaint,
-      interval_maintenance: parseInt(interval, 10),
-      keterangan,
-    };
-
-    console.log('🛠 PUT->', `${API_BASE}/apar/${origId}`);
-    console.log('   payload:', payload);
-
     try {
-      const res = await fetch(`${API_BASE}/apar/${origId}`, {
+      await safeFetchOffline(`${API_BASE}/apar/${origId}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
+        body: JSON.stringify({
+          id_apar: idApar,
+          no_apar: noApar,
+          lokasi_apar: lokasi,
+          jenis_apar: jenis,
+          keperluan_check: JSON.stringify(checklist.filter(i => i.trim())),
+          qr_code_apar: idApar,
+          status_apar: status,
+          tgl_exp: tglExp,
+          tgl_terakhir_maintenance: tglMaint,
+          interval_maintenance: parseInt(interval, 10),
+          keterangan,
+        }),
       });
-      console.log('   response status:', res.status);
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-
-      Alert.alert('Sukses', 'Data APAR berhasil diupdate.', [
+      Alert.alert('Sukses', 'Data APAR berhasil diperbarui.', [
         {
           text: 'OK',
-          onPress: () => router.push('/apar/ReadApar'),
+          onPress: () => router.back(),
         },
       ]);
     } catch (e: any) {
-      console.error('🛠 PUT error:', e);
-      Alert.alert('Error menyimpan', e.message);
+      Alert.alert(
+        e.message === 'Offline' ? 'Offline' : 'Error menyimpan',
+        e.message === 'Offline'
+          ? 'Silakan ulang saat online.'
+          : e.message
+      );
     }
   };
 
-  const downloadQR = () => {
-    if (!qrContainerRef.current) {
-      return Alert.alert('Error', 'QR belum siap di‑download');
+  // Download QR code
+  const handleDownloadQR = () => {
+    if (!qrRef.current) {
+      return Alert.alert('Error', 'QR belum siap diunduh');
     }
     InteractionManager.runAfterInteractions(async () => {
       try {
-        const tmpUri = await captureRef(qrContainerRef, {
+        const uri = await captureRef(qrRef, {
           format: 'png',
           quality: 1,
           result: 'tmpfile',
         });
-        const cleanJenis =
-          jenis.trim().replace(/\s+/g, '-').toLowerCase() || 'apar';
-        const filename = `${cleanJenis}_${idApar}.png`;
+        const filename = `apar_${idApar}.png`;
         const dest = FileSystem.cacheDirectory + filename;
-        await FileSystem.moveAsync({ from: tmpUri, to: dest });
+        await FileSystem.moveAsync({ from: uri, to: dest });
+
         const { status } = await MediaLibrary.requestPermissionsAsync();
         if (status === 'granted') {
           const asset = await MediaLibrary.createAssetAsync(dest);
           await MediaLibrary.createAlbumAsync('QR APAR', asset, false);
-          Alert.alert('Tersimpan', `${filename} berhasil disimpan.`);
+          Alert.alert('Tersimpan', filename);
         } else {
-          Alert.alert('Izin ditolak', 'Tidak bisa menyimpan ke gallery.');
+          Alert.alert('Error', 'Izin penyimpanan ditolak');
         }
-      } catch (e: any) {
-        Alert.alert('Gagal download', e.message);
+      } catch (err: any) {
+        Alert.alert('Gagal download', err.message);
       }
     });
   };
@@ -304,24 +296,25 @@ export default function EditApar() {
         <HeaderTitle>Edit APAR</HeaderTitle>
       </Header>
       <Form>
+        {/* Identitas APAR */}
         <Section>
           <SectionTitle>Identitas APAR</SectionTitle>
-          <FieldLabel>ID APAR</FieldLabel>
-          <FieldInput value={idApar} onChangeText={setIdApar} />
+          <FieldLabel>No. APAR</FieldLabel>
+          <FieldInput value={noApar} onChangeText={setNoApar} />
 
-          <Card ref={qrContainerRef} collapsable={false}>
+          <FieldLabel>QR Code</FieldLabel>
+          <Card ref={qrRef} collapsable={false}>
             <QRTitle>{idApar}</QRTitle>
             <QRCodeSVG value={idApar} size={140} />
           </Card>
-          <SecondaryButton onPress={downloadQR}>
+          <SecondaryButton onPress={handleDownloadQR}>
             <SecondaryText>Download QR ke Gallery</SecondaryText>
           </SecondaryButton>
         </Section>
 
+        {/* Detail APAR */}
         <Section>
           <SectionTitle>Detail APAR</SectionTitle>
-          <FieldLabel>No. APAR</FieldLabel>
-          <FieldInput value={noApar} onChangeText={setNoApar} />
           <FieldLabel>Lokasi</FieldLabel>
           <FieldInput value={lokasi} onChangeText={setLokasi} />
           <FieldLabel>Jenis</FieldLabel>
@@ -330,63 +323,70 @@ export default function EditApar() {
           <FieldInput value={status} onChangeText={setStatus} />
         </Section>
 
+        {/* Checklist Kondisi */}
         <Section>
           <SectionTitle>Checklist Kondisi</SectionTitle>
-          {checklist.map((it, i) => (
-            <Row key={i}>
+          {checklist.map((item, idx) => (
+            <View
+              key={idx}
+              style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 8 }}
+            >
               <FieldInput
                 style={{ flex: 1, marginBottom: 0 }}
-                value={it}
-                onChangeText={txt => updateItem(txt, i)}
+                value={item}
+                onChangeText={txt => updateChecklistItem(txt, idx)}
               />
               {checklist.length > 1 && (
-                <RemoveBtn onPress={() => removeItem(i)}>
-                  <RemoveText>–</RemoveText>
-                </RemoveBtn>
+                <Pressable
+                  onPress={() => removeChecklistItem(idx)}
+                  style={{ marginLeft: 8, padding: 6, backgroundColor: C.primary, borderRadius: 4 }}
+                >
+                  <Text style={{ color: 'white', fontWeight: 'bold' }}>–</Text>
+                </Pressable>
               )}
-            </Row>
+            </View>
           ))}
-          <SecondaryButton onPress={addItem}>
-            <SecondaryText>+ Tambah Checklist</SecondaryText>
-          </SecondaryButton>
+          <Pressable
+            onPress={addChecklistItem}
+            style={{ backgroundColor: C.primary, padding: 12, borderRadius: 8, alignItems: 'center', marginBottom: 16 }}
+          >
+            <Text style={{ color: 'white', fontWeight: 'bold' }}>+ Tambah Checklist</Text>
+          </Pressable>
         </Section>
 
+        {/* Waktu & Interval */}
         <Section>
           <SectionTitle>Waktu & Interval</SectionTitle>
-          <FieldLabel>Exp. Date</FieldLabel>
+          <FieldLabel>Tgl Exp</FieldLabel>
           <Pressable onPress={() => setShowExpPicker(true)}>
             <FieldInput value={tglExp} editable={false} />
           </Pressable>
-
-          <FieldLabel>Terakhir Maintenance</FieldLabel>
+          <FieldLabel>Tgl Terakhir Maintenance</FieldLabel>
           <Pressable onPress={() => setShowMaintPicker(true)}>
             <FieldInput value={tglMaint} editable={false} />
           </Pressable>
-
           <FieldLabel>Interval (hari)</FieldLabel>
-          <FieldInput
-            value={interval}
-            onChangeText={setInterval}
-            keyboardType="numeric"
-          />
+          <FieldInput value={interval} onChangeText={setInterval} keyboardType="numeric" />
         </Section>
 
+        {/* Keterangan */}
         <Section>
-          <SectionTitle>Keterangan</SectionTitle>
+          <SectionTitle>Keterangan (opsional)</SectionTitle>
           <FieldInput
             value={keterangan}
             onChangeText={setKeterangan}
             multiline
-            textAlignVertical="top"
             style={{ minHeight: 80 }}
           />
         </Section>
 
-        <ButtonBase onPress={handleSubmit}>
+        {/* Tombol Simpan */}
+        <ButtonBase onPress={handleSubmit} disabled={loading}>
           <ButtonText>Simpan Perubahan</ButtonText>
         </ButtonBase>
       </Form>
 
+      {/* Date Pickers */}
       <DateTimePickerModal
         isVisible={showExpPicker}
         mode="date"
@@ -396,7 +396,6 @@ export default function EditApar() {
         }}
         onCancel={() => setShowExpPicker(false)}
       />
-
       <DateTimePickerModal
         isVisible={showMaintPicker}
         mode="date"

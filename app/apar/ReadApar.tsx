@@ -1,8 +1,8 @@
 // app/apar/ReadApar.tsx
-
 import { APAR, useAparList } from '@/hooks/useAparList';
+import { useIsFocused } from '@react-navigation/native';
 import { useRouter } from 'expo-router';
-import React from 'react';
+import React, { useEffect, useMemo } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -12,12 +12,24 @@ import {
   SafeAreaView,
   StyleSheet,
   Text,
-  View
+  View,
 } from 'react-native';
+import { safeFetchOffline } from '../../utils/safeFetchOffline';
 
 export default function ReadApar() {
   const router = useRouter();
+  const isFocused = useIsFocused();
   const { loading, list, stats, refresh } = useAparList();
+
+  // Refresh data tiap kali screen ter‑focus
+  useEffect(() => {
+    if (isFocused) {
+      refresh();
+    }
+  }, [isFocused, refresh]);
+
+  // Tampilkan item paling baru di atas
+  const displayList = useMemo(() => [...list], [list]);
 
   const baseUrl =
     Platform.OS === 'android'
@@ -32,14 +44,19 @@ export default function ReadApar() {
         style: 'destructive',
         onPress: async () => {
           try {
-            const res = await fetch(`${baseUrl}/api/apar/${id_apar}`, {
-              method: 'DELETE',
-            });
+            const res = await safeFetchOffline(
+              `${baseUrl}/api/apar/${id_apar}`,
+              { method: 'DELETE' }
+            );
             if (!res.ok) throw new Error('Gagal menghapus data');
-            refresh();
+            await refresh();
             Alert.alert('Sukses', 'Data APAR berhasil dihapus.');
           } catch (e: any) {
-            Alert.alert('Error', e.message);
+            if (e.message === 'Offline') {
+              Alert.alert('Offline', 'Silakan coba lagi saat online.');
+            } else {
+              Alert.alert('Error', e.message);
+            }
           }
         },
       },
@@ -63,12 +80,9 @@ export default function ReadApar() {
       </View>
 
       <FlatList<APAR>
-        data={list}
-        // ← PENTING: kalau item.id_apar falsy (undefined/''), pakai idx.toString()
-        keyExtractor={(item, idx) => 
-          item.id_apar && item.id_apar.trim() !== ''
-            ? item.id_apar.trim()
-            : idx.toString()
+        data={displayList}
+        keyExtractor={(item, idx) =>
+          item.id_apar?.trim() ? item.id_apar.trim() : idx.toString()
         }
         renderItem={({ item }) => (
           <View style={styles.card}>
@@ -84,7 +98,10 @@ export default function ReadApar() {
               <Pressable
                 style={[styles.btn, styles.btnEdit]}
                 onPress={() =>
-                  router.push({ pathname: '/apar/EditApar', params: { id_apar: item.id_apar } })
+                  router.push({
+                    pathname: '/apar/EditApar',
+                    params: { id_apar: item.id_apar },
+                  })
                 }
               >
                 <Text style={styles.btnText}>Edit</Text>
@@ -107,20 +124,25 @@ export default function ReadApar() {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#fafafa' },
-  center:    { flex: 1, justifyContent: 'center', alignItems: 'center' },
+  center: { flex: 1, justifyContent: 'center', alignItems: 'center' },
   stats: {
-    padding: 16, backgroundColor: '#fff',
-    borderBottomWidth: 1, borderColor: '#ddd',
+    padding: 16,
+    backgroundColor: '#fff',
+    borderBottomWidth: 1,
+    borderColor: '#ddd',
   },
   card: {
-    padding: 16, backgroundColor: '#fff',
-    margin: 16, borderRadius: 8, elevation: 2,
+    padding: 16,
+    backgroundColor: '#fff',
+    margin: 16,
+    borderRadius: 8,
+    elevation: 2,
   },
-  title:    { fontWeight: 'bold', marginBottom: 8 },
-  actions:  { flexDirection: 'row', justifyContent: 'flex-end', marginTop: 12 },
-  btn:       { paddingVertical: 6, paddingHorizontal: 12, borderRadius: 4 },
-  btnEdit:   { backgroundColor: '#FFD600', marginRight: 8 },
+  title: { fontWeight: 'bold', marginBottom: 8 },
+  actions: { flexDirection: 'row', justifyContent: 'flex-end', marginTop: 12 },
+  btn: { paddingVertical: 6, paddingHorizontal: 12, borderRadius: 4 },
+  btnEdit: { backgroundColor: '#FFD600', marginRight: 8 },
   btnDelete: { backgroundColor: '#D50000' },
-  btnText:   { color: '#fff', fontWeight: 'bold' },
+  btnText: { color: '#fff', fontWeight: 'bold' },
   separator: { height: 12 },
 });

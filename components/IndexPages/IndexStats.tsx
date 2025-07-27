@@ -2,35 +2,38 @@
 import { Box } from '@/components/ui/boxApar';
 import Colors from '@/constants/Colors';
 import React, { useEffect, useState } from 'react';
-import { ActivityIndicator } from 'react-native';
+import { ActivityIndicator, Dimensions, TouchableOpacity } from 'react-native';
 import styled from 'styled-components/native';
 
+const screenWidth = Dimensions.get('window').width;
+const cardWidth = (screenWidth - 48) / 2; // 2 kartu per baris + padding
+
+const StatsContainer = styled.View`
+  padding: 12px 16px;
+  background-color: #f8f9fa;
+`;
+
 const Row = styled.View`
-  padding-top: 16px;
   flex-direction: row;
+  flex-wrap: wrap;
   justify-content: space-between;
-  margin-bottom: 16px;
 `;
 
-const StatCard = styled(Box).attrs({ p: 16, mH: 8, radius: 8, elevation: 2 })`
-  flex: 1;
+const StatCard = styled(Box).attrs({ p: 14, mB: 12, radius: 8, elevation: 1 })`
+  width: ${cardWidth}px;
+  background-color: #fff;
   align-items: center;
-`;
-
-const StatCount = styled.Text`
-  font-size: 20px;
-  font-weight: bold;
-  color: ${Colors.primary};
-  margin-top: 4px;
+  justify-content: center;
 `;
 
 const StatLabel = styled.Text`
-  font-size: 14px;
-  color: ${Colors.text};
+  font-size: 13px;
+  font-weight: 600;
+  color: ${Colors.primary};
   text-align: center;
 `;
 
-export default function IndexStats() {
+export default function IndexStats({ onSelectJenis }: { onSelectJenis: (jenis: string) => void }) {
   const [data, setData] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -53,28 +56,20 @@ export default function IndexStats() {
     return <ActivityIndicator size="large" color={Colors.primary} />;
   }
 
-  const totalData = data.length;
-  // const expiredCount = data.filter(item => item.status_apar === 'expired').length;
-  const MaintenanceCount = data.filter(item => item.status_apar === 'Maintenance').length;
-  // const troubleCount = data.filter(item =>
-  //   ['maintenance', 'rusak'].includes(item.status_apar)
-  // ).length;
-
-  const stats = [
-    { label: 'Maintenance', count: MaintenanceCount, color: Colors.badge.Maintenance },
-    // { label: 'Trouble',   count: troubleCount, color: Colors.badge.Trouble },
-    // { label: 'Expired',   count: expiredCount, color: Colors.badge.Expired },
-    { label: 'Total Apar',count: totalData,    color: Colors.primary }
-  ];
+  const jenisSet = new Set(data.map((item) => item.jenis_apar));
+  const jenisList = Array.from(jenisSet);
 
   return (
-    <Row>
-      {stats.map(s => (
-        <StatCard key={s.label}>
-          <StatCount>{s.count}</StatCount>
-          <StatLabel>{s.label}</StatLabel>
-        </StatCard>
-      ))}
-    </Row>
+    <StatsContainer>
+      <Row>
+        {jenisList.map((jenis) => (
+          <TouchableOpacity key={jenis} onPress={() => onSelectJenis(jenis)}>
+            <StatCard>
+              <StatLabel numberOfLines={2}>{jenis}</StatLabel>
+            </StatCard>
+          </TouchableOpacity>
+        ))}
+      </Row>
+    </StatsContainer>
   );
 }

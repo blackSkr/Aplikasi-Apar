@@ -1,13 +1,13 @@
 // src/components/Header.tsx
+import Colors from '@/constants/Colors';
+import { useBadge } from '@/context/BadgeContext';
+import { Ionicons } from '@expo/vector-icons';
+import { useNetInfo } from '@react-native-community/netinfo';
+import Constants from 'expo-constants';
+import { LinearGradient } from 'expo-linear-gradient';
 import React, { FC, useEffect, useState } from 'react';
 import { GestureResponderEvent } from 'react-native';
 import styled from 'styled-components/native';
-import { Ionicons } from '@expo/vector-icons';
-import Constants from 'expo-constants';
-import { LinearGradient } from 'expo-linear-gradient';
-import Colors from '@/constants/Colors';
-import { useNetInfo } from '@react-native-community/netinfo';
-import { useBadge } from '@/context/BadgeContext';
 
 const HeaderContainer = styled(LinearGradient).attrs({
   colors: [Colors.primaryheader, Colors.primaryLight],
@@ -92,23 +92,21 @@ const TimeText = styled.Text`
 `;
 
 type HeaderProps = {
-  /** Dipanggil saat user menekan tombol Logout. */
   onLogout: (e: GestureResponderEvent) => void;
+  selectedJenis?: string | null;
 };
 
-const Header: FC<HeaderProps> = ({ onLogout }) => {
+const Header: FC<HeaderProps> = ({ onLogout, selectedJenis }) => {
   const [now, setNow] = useState(new Date());
   const netInfo = useNetInfo();
   const isConnected = netInfo.isConnected;
   const { badgeNumber } = useBadge();
 
-  // Update waktu setiap detik
   useEffect(() => {
     const timer = setInterval(() => setNow(new Date()), 1000);
     return () => clearInterval(timer);
   }, []);
 
-  // Format tanggal & waktu
   const dateStr = now.toLocaleDateString('id-ID', {
     weekday: 'short',
     day: 'numeric',
@@ -121,7 +119,6 @@ const Header: FC<HeaderProps> = ({ onLogout }) => {
     second: '2-digit',
   });
 
-  // Sapaan profesional berdasarkan jam
   const hour = now.getHours();
   let greeting = 'Halo';
   if (hour < 12) greeting = 'Selamat pagi';
@@ -144,7 +141,9 @@ const Header: FC<HeaderProps> = ({ onLogout }) => {
             />
           </LogoWrapper>
           <TitleGroup>
-            <TitleText>Manajemen APAR</TitleText>
+            <TitleText>
+              Manajemen {selectedJenis ? `- ${selectedJenis}` : ''}
+            </TitleText>
             <SubtitleText>{subtitle}</SubtitleText>
           </TitleGroup>
         </LogoTitle>
@@ -155,11 +154,7 @@ const Header: FC<HeaderProps> = ({ onLogout }) => {
       </TopRow>
 
       <TimeRow>
-        <Ionicons
-          name="calendar-outline"
-          size={14}
-          color="rgba(255,255,255,0.8)"
-        />
+        <Ionicons name="calendar-outline" size={14} color="rgba(255,255,255,0.8)" />
         <TimeText>{dateStr}</TimeText>
 
         <Ionicons
@@ -170,7 +165,6 @@ const Header: FC<HeaderProps> = ({ onLogout }) => {
         />
         <TimeText>{timeStr}</TimeText>
 
-        {/* Indikator koneksi */}
         <Ionicons
           name={isConnected ? 'wifi' : 'wifi-off'}
           size={14}

@@ -1,5 +1,8 @@
 // app/apar/EditApar.tsx
-import React, { useEffect, useState, useRef } from 'react';
+import * as FileSystem from 'expo-file-system';
+import * as MediaLibrary from 'expo-media-library';
+import { useLocalSearchParams, useRouter } from 'expo-router';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -8,16 +11,13 @@ import {
   Platform,
   Pressable,
   ScrollView,
-  View,
   Text,
   TextInput,
+  View,
 } from 'react-native';
-import { useRouter, useLocalSearchParams } from 'expo-router';
 import DateTimePickerModal from 'react-native-modal-datetime-picker';
 import QRCodeSVG from 'react-native-qrcode-svg';
 import { captureRef } from 'react-native-view-shot';
-import * as FileSystem from 'expo-file-system';
-import * as MediaLibrary from 'expo-media-library';
 import styled from 'styled-components/native';
 import { safeFetchOffline } from '../../utils/safeFetchOffline';
 

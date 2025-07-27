@@ -1,12 +1,12 @@
 // src/components/IndexStats.tsx
 import { Box } from '@/components/ui/boxApar';
 import Colors from '@/constants/Colors';
-import React, { useEffect, useState } from 'react';
-import { ActivityIndicator, Dimensions, TouchableOpacity } from 'react-native';
+import React from 'react';
+import { Dimensions, TouchableOpacity } from 'react-native';
 import styled from 'styled-components/native';
 
 const screenWidth = Dimensions.get('window').width;
-const cardWidth = (screenWidth - 48) / 2; // 2 kartu per baris + padding
+const cardWidth = (screenWidth - 48) / 2;
 
 const StatsContainer = styled.View`
   padding: 12px 16px;
@@ -33,32 +33,13 @@ const StatLabel = styled.Text`
   text-align: center;
 `;
 
-export default function IndexStats({ onSelectJenis }: { onSelectJenis: (jenis: string) => void }) {
-  const [data, setData] = useState<any[]>([]);
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    const fetchApar = async () => {
-      try {
-        const res = await fetch('http://192.168.245.1:3000/api/apar');
-        const json = await res.json();
-        setData(json);
-      } catch (err) {
-        console.error('Error fetching APAR:', err);
-      } finally {
-        setLoading(false);
-      }
-    };
-    fetchApar();
-  }, []);
-
-  if (loading) {
-    return <ActivityIndicator size="large" color={Colors.primary} />;
-  }
-
-  const jenisSet = new Set(data.map((item) => item.jenis_apar));
-  const jenisList = Array.from(jenisSet);
-
+export default function IndexStats({
+  jenisList,
+  onSelectJenis,
+}: {
+  jenisList: string[];
+  onSelectJenis: (jenis: string) => void;
+}) {
   return (
     <StatsContainer>
       <Row>

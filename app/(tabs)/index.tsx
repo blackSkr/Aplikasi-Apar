@@ -44,7 +44,7 @@ const ShowMoreText = styled(Text)`
 
 export default function AparInformasi() {
   const router = useRouter();
-  const { loading, list, refresh } = useAparList();
+  const { loading, list, stats, refresh, jenisList } = useAparList();
 
   const [selectedJenis, setSelectedJenis] = useState<string | null>(null);
   const [asc, setAsc] = useState(true);
@@ -66,13 +66,21 @@ export default function AparInformasi() {
 
   const filtered = useMemo(() => {
     if (!selectedJenis) return [];
-    return list.filter((i) => i.jenis_apar === selectedJenis);
+    return list.filter(
+      (i) =>
+        i.jenis_apar === selectedJenis &&
+        i.status_apar === 'Maintenance' // hanya yang perlu maintenance
+    );
   }, [list, selectedJenis]);
 
-  const sorted = useMemo(() =>
-    filtered.slice().sort((a, b) =>
-      asc ? a.daysRemaining - b.daysRemaining : b.daysRemaining - a.daysRemaining
-    ), [filtered, asc]
+  const sorted = useMemo(
+    () =>
+      filtered
+        .slice()
+        .sort((a, b) =>
+          asc ? a.daysRemaining - b.daysRemaining : b.daysRemaining - a.daysRemaining
+        ),
+    [filtered, asc]
   );
 
   const dataToRender = showAll ? sorted : sorted.slice(0, 3);
@@ -97,31 +105,29 @@ export default function AparInformasi() {
     );
   }
 
-  if (!isConnected) {
-    return (
-      <SafeAreaView style={styles.center}>
-        <Text style={{ marginBottom: 8 }}>Kamu sedang offline.</Text>
-        <TouchableOpacity onPress={() => refresh()}>
-          <Text style={{ color: Colors.primary }}>Coba lagi</Text>
-        </TouchableOpacity>
-      </SafeAreaView>
-    );
-  }
-
   return (
     <Container>
       <Header
-          selectedJenis={selectedJenis}
-          onLogout={() => {
-            // Handle logout di sini (misalnya router.replace('/login') atau apapun sesuai app-mu)
-          }}
-        />
+        selectedJenis={selectedJenis}
+        onLogout={() => {
+          // Handle logout jika diperlukan
+        }}
+      />
+
+      {!isConnected && (
+        <View style={styles.offlineBanner}>
+          <Text style={styles.offlineText}>
+            Kamu sedang offline.
+          </Text>
+        </View>
+      )}
+
       <SectionList<APAR>
         sections={sections}
         keyExtractor={(item, idx) => item.id_apar ?? idx.toString()}
         ListHeaderComponent={() => (
           <>
-            <Stats onSelectJenis={setSelectedJenis} />
+            <Stats jenisList={jenisList} onSelectJenis={setSelectedJenis} />
             <Options router={router} />
           </>
         )}
@@ -153,7 +159,11 @@ export default function AparInformasi() {
         )}
         ListEmptyComponent={() => (
           <View style={styles.center}>
-            <Text>{selectedJenis ? `Tidak ada data untuk jenis "${selectedJenis}".` : 'Silakan pilih jenis APAR terlebih dahulu.'}</Text>
+            <Text>
+              {selectedJenis
+                ? `Tidak ada APAR dengan status Maintenance untuk jenis "${selectedJenis}".`
+                : 'Silakan pilih jenis APAR terlebih dahulu.'}
+            </Text>
           </View>
         )}
         ListFooterComponent={renderFooter}
@@ -164,5 +174,19 @@ export default function AparInformasi() {
 }
 
 const styles = StyleSheet.create({
-  center: { flex: 1, justifyContent: 'center', alignItems: 'center' },
+  center: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  offlineBanner: {
+    // backgroundColor: '#FFF3CD',
+    padding: 10,
+    alignItems: 'center',
+  },
+  offlineText: {
+    color: '#D5000',
+    fontSize: 13,
+  },
 });
+

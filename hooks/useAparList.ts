@@ -1,9 +1,8 @@
 // src/hooks/useAparList.ts
-import { useState, useEffect, useCallback, useMemo } from 'react';
-import { Platform, Alert } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import NetInfo from '@react-native-community/netinfo';
-import { safeFetchOffline } from '../utils/safeFetchOffline';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { Alert, Platform } from 'react-native';
 
 export type APARStatus = 'Sehat' | 'Maintenance' | 'Expired';
 
@@ -40,41 +39,47 @@ export function useAparList() {
 
   const load = useCallback(async () => {
     setLoading(true);
-    const net = await NetInfo.fetch();
-    if (net.isConnected) {
-      // jika online, fetch dan update cache
-      try {
-        const res = await fetch(apiUrl);
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        const data: AparRaw[] = await res.json();
-        setRawData(data);
-        await AsyncStorage.setItem(CACHE_KEY, JSON.stringify(data));
-      } catch (e: any) {
-        console.warn('Fetch error, fallback ke cache:', e);
+
+    try {
+      const net = await NetInfo.fetch();
+      const online = net.isConnected === true;
+
+      if (online) {
+        try {
+          const res = await fetch(apiUrl);
+          if (!res.ok) throw new Error(`HTTP ${res.status}`);
+          const data: AparRaw[] = await res.json();
+          setRawData(data);
+          await AsyncStorage.setItem(CACHE_KEY, JSON.stringify(data));
+        } catch (err: any) {
+          const cached = await AsyncStorage.getItem(CACHE_KEY);
+          if (cached) {
+            setRawData(JSON.parse(cached));
+            Alert.alert('Offline Mode', 'Menampilkan data dari cache terakhir.');
+          } else {
+            Alert.alert('Gagal Memuat', 'Server tidak dapat diakses & cache kosong.');
+          }
+        }
+      } else {
         const cached = await AsyncStorage.getItem(CACHE_KEY);
         if (cached) {
           setRawData(JSON.parse(cached));
         } else {
-          Alert.alert('Error', e.message);
+          Alert.alert('Offline', 'Tidak ada data cache. Silakan sambungkan ke internet.');
         }
       }
-    } else {
-      // offline: ambil list dari cache
-      const cached = await AsyncStorage.getItem(CACHE_KEY);
-      if (cached) {
-        setRawData(JSON.parse(cached));
-      } else {
-        Alert.alert('Offline', 'Tidak ada cache. Nyalakan koneksi dulu.');
-      }
+
+    } catch (e) {
+      Alert.alert('Error', 'Terjadi masalah saat membaca data.');
+    } finally {
+      setLoading(false);
     }
-    setLoading(false);
   }, [apiUrl]);
 
   useEffect(() => {
     load();
   }, [load]);
 
-  // hitung daysRemaining & nextCheckDate
   const list: APAR[] = useMemo(() => {
     const today = new Date();
     today.setHours(0, 0, 0, 0);
@@ -83,8 +88,7 @@ export function useAparList() {
       last.setHours(0, 0, 0, 0);
       const next = new Date(last);
       next.setDate(next.getDate() + item.interval_maintenance);
-      const diff =
-        Math.ceil((next.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
+      const diff = Math.ceil((next.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
       const y = next.getFullYear();
       const m = String(next.getMonth() + 1).padStart(2, '0');
       const d = String(next.getDate()).padStart(2, '0');
@@ -96,7 +100,6 @@ export function useAparList() {
     });
   }, [rawData]);
 
-  // hitung stats
   useEffect(() => {
     const total = list.length;
     const trouble = list.filter(i => i.status_apar === 'Maintenance').length;
@@ -104,5 +107,10 @@ export function useAparList() {
     setStats({ total, trouble, expired });
   }, [list]);
 
-  return { loading, list, stats, refresh: load };
+  const jenisList = useMemo(() => {
+    const set = new Set(list.map(i => i.jenis_apar));
+    return Array.from(set);
+  }, [list]);
+
+  return { loading, list, stats, refresh: load, jenisList };
 }

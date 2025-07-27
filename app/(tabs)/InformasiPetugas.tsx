@@ -144,9 +144,14 @@ export default function TambahPetugas() {
           <NavButtonText>Baca APAR</NavButtonText>
         </NavButton>
 
-        <NavButton onPress={() => router.push('/petugas_pages/DaftarDataPetugas')}>
+        {/* <NavButton onPress={() => router.push('/petugas_pages/DaftarDataPetugas')}>
           <IconSymbol name="list.bullet" size={18} color={Colors.primary} />
           <NavButtonText>Daftar Petugas</NavButtonText>
+        </NavButton> */}
+
+        <NavButton onPress={() => router.push('/apar/MaintenanceApar')}>
+          <IconSymbol name="list.bullet" size={18} color={Colors.primary} />
+          <NavButtonText>Tes Maintenance</NavButtonText>
         </NavButton>
 
         <NavButton onPress={() => router.push('/apar/CreateApar')}>

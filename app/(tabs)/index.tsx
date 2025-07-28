@@ -132,9 +132,9 @@ export default function AparInformasi() {
         renderSectionHeader={() =>
           selectedJenis ? (
             <StatsWrapper>
-              <Text style={styles.sectionTitle}>
+              {/* <Text style={styles.sectionTitle}>
                 Jenis : {selectedJenis}
-              </Text>
+              </Text> */}
               <Controls asc={asc} onToggle={() => setAsc(prev => !prev)} />
             </StatsWrapper>
           ) : null

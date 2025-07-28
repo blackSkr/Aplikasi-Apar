@@ -1,9 +1,9 @@
-// app/(tabs)/index.tsx
 import NetInfo from '@react-native-community/netinfo';
 import { useRouter } from 'expo-router';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
+  Alert,
   SafeAreaView,
   SectionList,
   StyleSheet,
@@ -19,7 +19,7 @@ import Controls from '@/components/IndexPages/IndexControl';
 import Options from '@/components/IndexPages/IndexOptions';
 import Stats from '@/components/IndexPages/IndexStats';
 import Colors from '@/constants/Colors';
-import { APAR, useAparList } from '@/hooks/useAparList';
+import { useAparList } from '@/hooks/useAparList';
 
 const Container = styled.View`
   flex: 1;
@@ -51,37 +51,40 @@ export default function AparInformasi() {
   const [showAll, setShowAll] = useState(false);
   const [isConnected, setIsConnected] = useState(true);
 
+  // 🔌 Cek koneksi internet
   useEffect(() => {
-    const unsub = NetInfo.addEventListener((s) =>
-      setIsConnected(s.isConnected === true)
-    );
-    return () => unsub();
+    const unsubscribe = NetInfo.addEventListener(state => {
+      console.log('📶 Status koneksi:', state.isConnected);
+      setIsConnected(state.isConnected === true);
+    });
+
+    return () => unsubscribe();
   }, []);
 
+  // 🔄 Refresh data saat online
   useEffect(() => {
     if (isConnected) {
       refresh();
+    } else {
+      console.log('⚠️ Offline, memuat dari cache...');
     }
   }, [isConnected, refresh]);
 
+  // 🔍 Filter berdasarkan jenis
   const filtered = useMemo(() => {
     if (!selectedJenis) return [];
-    return list.filter(
-      (i) =>
-        i.jenis_apar === selectedJenis &&
-        i.status_apar === 'Maintenance' // hanya yang perlu maintenance
-    );
+    const result = list.filter(item => item.jenis_apar === selectedJenis);
+    console.log(`🎯 Filter: ${selectedJenis}, Ditemukan: ${result.length}`);
+    return result;
   }, [list, selectedJenis]);
 
-  const sorted = useMemo(
-    () =>
-      filtered
-        .slice()
-        .sort((a, b) =>
-          asc ? a.daysRemaining - b.daysRemaining : b.daysRemaining - a.daysRemaining
-        ),
-    [filtered, asc]
-  );
+  // 🔃 Urutkan berdasarkan daysRemaining
+  const sorted = useMemo(() => {
+    const result = filtered.slice().sort((a, b) =>
+      asc ? a.daysRemaining - b.daysRemaining : b.daysRemaining - a.daysRemaining
+    );
+    return result;
+  }, [filtered, asc]);
 
   const dataToRender = showAll ? sorted : sorted.slice(0, 3);
   const sections = [{ title: 'StatsHeader', data: dataToRender }];
@@ -89,10 +92,8 @@ export default function AparInformasi() {
   const renderFooter = useCallback(() => {
     if (sorted.length <= 3) return null;
     return (
-      <ShowMoreButton onPress={() => setShowAll((v) => !v)}>
-        <ShowMoreText>
-          {showAll ? 'Tampilkan Sedikit' : 'Lihat Semua'}
-        </ShowMoreText>
+      <ShowMoreButton onPress={() => setShowAll(prev => !prev)}>
+        <ShowMoreText>{showAll ? 'Tampilkan Sedikit' : 'Lihat Semua'}</ShowMoreText>
       </ShowMoreButton>
     );
   }, [sorted.length, showAll]);
@@ -101,6 +102,7 @@ export default function AparInformasi() {
     return (
       <SafeAreaView style={styles.center}>
         <ActivityIndicator size="large" />
+        <Text>Memuat data APAR...</Text>
       </SafeAreaView>
     );
   }
@@ -109,22 +111,18 @@ export default function AparInformasi() {
     <Container>
       <Header
         selectedJenis={selectedJenis}
-        onLogout={() => {
-          // Handle logout jika diperlukan
-        }}
+        onLogout={() => Alert.alert('Logout', 'Belum diimplementasi')}
       />
 
       {!isConnected && (
         <View style={styles.offlineBanner}>
-          <Text style={styles.offlineText}>
-            Kamu sedang offline.
-          </Text>
+          <Text style={styles.offlineText}>📴 Kamu sedang offline.</Text>
         </View>
       )}
 
-      <SectionList<APAR>
+      <SectionList
         sections={sections}
-        keyExtractor={(item, idx) => item.id_apar ?? idx.toString()}
+        keyExtractor={(item, index) => item.id_apar ?? index.toString()}
         ListHeaderComponent={() => (
           <>
             <Stats jenisList={jenisList} onSelectJenis={setSelectedJenis} />
@@ -134,21 +132,13 @@ export default function AparInformasi() {
         renderSectionHeader={() =>
           selectedJenis ? (
             <StatsWrapper>
-              <Text
-                style={{
-                  fontSize: 16,
-                  fontWeight: 'bold',
-                  marginHorizontal: 12,
-                  marginBottom: 8,
-                }}
-              >
+              <Text style={styles.sectionTitle}>
                 Jenis : {selectedJenis}
               </Text>
-              <Controls asc={asc} onToggle={() => setAsc((s) => !s)} />
+              <Controls asc={asc} onToggle={() => setAsc(prev => !prev)} />
             </StatsWrapper>
           ) : null
         }
-        stickySectionHeadersEnabled
         renderItem={({ item }) => (
           <IndexAparCard
             item={item}
@@ -161,13 +151,14 @@ export default function AparInformasi() {
           <View style={styles.center}>
             <Text>
               {selectedJenis
-                ? `Tidak ada APAR dengan status Maintenance untuk jenis "${selectedJenis}".`
+                ? `Tidak ada APAR untuk jenis "${selectedJenis}".`
                 : 'Silakan pilih jenis APAR terlebih dahulu.'}
             </Text>
           </View>
         )}
         ListFooterComponent={renderFooter}
         contentContainerStyle={{ paddingBottom: 16 }}
+        stickySectionHeadersEnabled
       />
     </Container>
   );
@@ -180,13 +171,18 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   offlineBanner: {
-    // backgroundColor: '#FFF3CD',
     padding: 10,
     alignItems: 'center',
+    backgroundColor: '#FFF3CD',
   },
   offlineText: {
-    color: '#D5000',
+    color: '#D50000',
     fontSize: 13,
   },
+  sectionTitle: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    marginHorizontal: 12,
+    marginBottom: 8,
+  },
 });
-

@@ -139,7 +139,7 @@ export default function TambahPetugas() {
 
       {/* 2 Tombol Navigasi Baru */}
       <NavWrapper>
-        <NavButton onPress={() => router.push('/apar/ReadApar')}>
+        <NavButton onPress={() => router.push('/ManajemenApar/AparView')}>
           <IconSymbol name="book.fill" size={18} color={Colors.primary} />
           <NavButtonText>Baca APAR</NavButtonText>
         </NavButton>
@@ -149,7 +149,8 @@ export default function TambahPetugas() {
           <NavButtonText>Daftar Petugas</NavButtonText>
         </NavButton> */}
 
-        <NavButton onPress={() => router.push('/apar/MaintenanceApar')}>
+        {/* <NavButton onPress={() => router.push('/apar/MaintenanceApar')}> */}
+        <NavButton onPress={() => router.push('/ManajemenApar/AparMaintenance')}>
           <IconSymbol name="list.bullet" size={18} color={Colors.primary} />
           <NavButtonText>Tes Maintenance</NavButtonText>
         </NavButton>

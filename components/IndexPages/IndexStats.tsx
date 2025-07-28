@@ -1,4 +1,5 @@
 // src/components/IndexStats.tsx
+
 import { Box } from '@/components/ui/boxApar';
 import Colors from '@/constants/Colors';
 import React from 'react';
@@ -33,18 +34,25 @@ const StatLabel = styled.Text`
   text-align: center;
 `;
 
-export default function IndexStats({
-  jenisList,
-  onSelectJenis,
-}: {
-  jenisList: string[];
+type IndexStatsProps = {
+  jenisList?: string[]; // nullable atau optional
   onSelectJenis: (jenis: string) => void;
-}) {
+};
+
+export default function IndexStats({
+  jenisList = ['APAR', 'Hydrant', 'Alarm'], // fallback dummy
+  onSelectJenis,
+}: IndexStatsProps) {
+  const listSiapRender = (jenisList || []).filter((j) => !!j);
+
   return (
     <StatsContainer>
       <Row>
-        {jenisList.map((jenis) => (
-          <TouchableOpacity key={jenis} onPress={() => onSelectJenis(jenis)}>
+        {listSiapRender.map((jenis, index) => (
+          <TouchableOpacity
+            key={`${jenis}-${index}`}
+            onPress={() => onSelectJenis(jenis)}
+          >
             <StatCard>
               <StatLabel numberOfLines={2}>{jenis}</StatLabel>
             </StatCard>

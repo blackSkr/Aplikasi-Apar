@@ -1,4 +1,5 @@
-// src/hooks/useAparList.ts
+// hooks/useAparList.ts
+
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import NetInfo from '@react-native-community/netinfo';
 import { useCallback, useEffect, useMemo, useState } from 'react';
@@ -11,13 +12,11 @@ export interface AparRaw {
   no_apar: string;
   lokasi_apar: string;
   jenis_apar: string;
-  keperluan_check: string;
-  qr_code_apar: string;
   status_apar: APARStatus;
-  tgl_exp: string;
   tgl_terakhir_maintenance: string;
   interval_maintenance: number;
   keterangan: string;
+  tgl_exp: string;
 }
 
 export interface APAR extends AparRaw {
@@ -30,7 +29,8 @@ export function useAparList() {
     Platform.OS === 'android'
       ? 'http://10.0.2.2:3000'
       : 'http://localhost:3000';
-  const apiUrl = `${baseUrl}/api/apar`;
+
+  const apiUrl = `${baseUrl}/api/peralatan`; // ganti ke endpoint baru
   const CACHE_KEY = 'APAR_CACHE';
 
   const [loading, setLoading] = useState(true);
@@ -49,9 +49,20 @@ export function useAparList() {
           const res = await fetch(apiUrl);
           if (!res.ok) throw new Error(`HTTP ${res.status}`);
           const data: AparRaw[] = await res.json();
+// console.log('📦 DATA DARI API:', data);
+
           setRawData(data);
+
           await AsyncStorage.setItem(CACHE_KEY, JSON.stringify(data));
+
+          for (const apar of data) {
+            const key = `cached-apar-${apar.id_apar}`;
+            await AsyncStorage.setItem(key, JSON.stringify(apar));
+          }
+
         } catch (err: any) {
+          console.error('Fetch error:', err);
+
           const cached = await AsyncStorage.getItem(CACHE_KEY);
           if (cached) {
             setRawData(JSON.parse(cached));
@@ -83,15 +94,20 @@ export function useAparList() {
   const list: APAR[] = useMemo(() => {
     const today = new Date();
     today.setHours(0, 0, 0, 0);
+
     return rawData.map(item => {
       const last = new Date(item.tgl_terakhir_maintenance);
       last.setHours(0, 0, 0, 0);
+
       const next = new Date(last);
       next.setDate(next.getDate() + item.interval_maintenance);
+
       const diff = Math.ceil((next.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
+
       const y = next.getFullYear();
       const m = String(next.getMonth() + 1).padStart(2, '0');
       const d = String(next.getDate()).padStart(2, '0');
+
       return {
         ...item,
         daysRemaining: diff,
@@ -112,5 +128,11 @@ export function useAparList() {
     return Array.from(set);
   }, [list]);
 
-  return { loading, list, stats, refresh: load, jenisList };
+  return {
+    loading,
+    list,
+    stats,
+    refresh: load,
+    jenisList,
+  };
 }

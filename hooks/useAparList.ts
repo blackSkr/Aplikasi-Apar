@@ -1,7 +1,6 @@
 // hooks/useAparList.ts
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import NetInfo from '@react-native-community/netinfo';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Alert, Platform } from 'react-native';
 
@@ -24,45 +23,36 @@ export interface APAR extends AparRaw {
   nextCheckDate: string;
 }
 
-export function useAparList() {
-  const baseUrl =
-    Platform.OS === 'android'
-      ? 'http://10.0.2.2:3000'
-      : 'http://localhost:3000';
+  export function useAparList() { 
+    const baseUrl =
+      Platform.OS === 'android'
+        ? 'http://10.0.2.2:3000'
+        : 'http://localhost:3000';
 
-  const apiUrl = `${baseUrl}/api/peralatan`; // ganti ke endpoint baru
-  const CACHE_KEY = 'APAR_CACHE';
+    const apiUrl = `${baseUrl}/api/peralatan`;
+    const CACHE_KEY = 'APAR_CACHE';
 
-  const [loading, setLoading] = useState(true);
-  const [rawData, setRawData] = useState<AparRaw[]>([]);
-  const [stats, setStats] = useState({ total: 0, trouble: 0, expired: 0 });
+    const [loading, setLoading] = useState(true);
+    const [page, setPage] = useState(1);
+    const [rawData, setRawData] = useState<AparRaw[]>([]);
+    const [hasMore, setHasMore] = useState(true);
+    const [stats, setStats] = useState({ total: 0, trouble: 0, expired: 0 });
 
-  const load = useCallback(async () => {
-    setLoading(true);
+    const fetchPage = useCallback(async (pageToFetch: number) => {
+      try {
+        const res = await fetch(`${apiUrl}?page=${pageToFetch}&limit=20`);
+        const data: AparRaw[] = await res.json();
 
-    try {
-      const net = await NetInfo.fetch();
-      const online = net.isConnected === true;
-
-      if (online) {
-        try {
-          const res = await fetch(apiUrl);
-          if (!res.ok) throw new Error(`HTTP ${res.status}`);
-          const data: AparRaw[] = await res.json();
-// console.log('📦 DATA DARI API:', data);
-
+        if (data.length < 20) setHasMore(false);
+        if (pageToFetch === 1) {
           setRawData(data);
-
           await AsyncStorage.setItem(CACHE_KEY, JSON.stringify(data));
-
-          for (const apar of data) {
-            const key = `cached-apar-${apar.id_apar}`;
-            await AsyncStorage.setItem(key, JSON.stringify(apar));
-          }
-
-        } catch (err: any) {
-          console.error('Fetch error:', err);
-
+        } else {
+          setRawData(prev => [...prev, ...data]);
+        }
+      } catch (err) {
+        console.error('Fetch error:', err);
+        if (pageToFetch === 1) {
           const cached = await AsyncStorage.getItem(CACHE_KEY);
           if (cached) {
             setRawData(JSON.parse(cached));
@@ -71,68 +61,71 @@ export function useAparList() {
             Alert.alert('Gagal Memuat', 'Server tidak dapat diakses & cache kosong.');
           }
         }
-      } else {
-        const cached = await AsyncStorage.getItem(CACHE_KEY);
-        if (cached) {
-          setRawData(JSON.parse(cached));
-        } else {
-          Alert.alert('Offline', 'Tidak ada data cache. Silakan sambungkan ke internet.');
-        }
       }
+    }, [apiUrl]);
 
-    } catch (e) {
-      Alert.alert('Error', 'Terjadi masalah saat membaca data.');
-    } finally {
-      setLoading(false);
-    }
-  }, [apiUrl]);
+    const load = useCallback(() => {
+      setPage(1);
+      setHasMore(true);
+      setLoading(true);
+      fetchPage(1).finally(() => setLoading(false));
+    }, [fetchPage]);
 
-  useEffect(() => {
-    load();
-  }, [load]);
+    const loadMore = useCallback(() => {
+      if (!hasMore) return;
+      const nextPage = page + 1;
+      setPage(nextPage);
+      fetchPage(nextPage);
+    }, [hasMore, page, fetchPage]);
 
-  const list: APAR[] = useMemo(() => {
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
+    useEffect(() => {
+      load();
+    }, [load]);
 
-    return rawData.map(item => {
-      const last = new Date(item.tgl_terakhir_maintenance);
-      last.setHours(0, 0, 0, 0);
+    const list: APAR[] = useMemo(() => {
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
 
-      const next = new Date(last);
-      next.setDate(next.getDate() + item.interval_maintenance);
+      return rawData.map(item => {
+        const last = new Date(item.tgl_terakhir_maintenance);
+        last.setHours(0, 0, 0, 0);
 
-      const diff = Math.ceil((next.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
+        const next = new Date(last);
+        next.setDate(next.getDate() + item.interval_maintenance);
 
-      const y = next.getFullYear();
-      const m = String(next.getMonth() + 1).padStart(2, '0');
-      const d = String(next.getDate()).padStart(2, '0');
+        const diff = Math.ceil((next.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
 
-      return {
-        ...item,
-        daysRemaining: diff,
-        nextCheckDate: `${y}-${m}-${d}`,
-      };
-    });
-  }, [rawData]);
+        const y = next.getFullYear();
+        const m = String(next.getMonth() + 1).padStart(2, '0');
+        const d = String(next.getDate()).padStart(2, '0');
 
-  useEffect(() => {
-    const total = list.length;
-    const trouble = list.filter(i => i.status_apar === 'Maintenance').length;
-    const expired = list.filter(i => i.status_apar === 'Expired').length;
-    setStats({ total, trouble, expired });
-  }, [list]);
+        return {
+          ...item,
+          daysRemaining: diff,
+          nextCheckDate: `${y}-${m}-${d}`,
+        };
+      });
+    }, [rawData]);
 
-  const jenisList = useMemo(() => {
-    const set = new Set(list.map(i => i.jenis_apar));
-    return Array.from(set);
-  }, [list]);
+    useEffect(() => {
+      const total = list.length;
+      const trouble = list.filter(i => i.status_apar === 'Maintenance').length;
+      const expired = list.filter(i => i.status_apar === 'Expired').length;
+      setStats({ total, trouble, expired });
+    }, [list]);
 
-  return {
-    loading,
-    list,
-    stats,
-    refresh: load,
-    jenisList,
-  };
-}
+    const jenisList = useMemo(() => {
+      const set = new Set(list.map(i => i.jenis_apar));
+      return Array.from(set);
+    }, [list]);
+
+    return {
+      loading,
+      list,
+      stats,
+      refresh: load,
+      loadMore, // <== TAMBAH INI
+      hasMore,
+      jenisList,
+    };
+  }

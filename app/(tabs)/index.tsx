@@ -42,127 +42,126 @@ const ShowMoreText = styled(Text)`
   font-weight: 600;
 `;
 
-export default function AparInformasi() {
-  const router = useRouter();
-  const { loading, list, stats, refresh, jenisList } = useAparList();
+  export default function AparInformasi() {
+    const router = useRouter();
+    const { loading, list, stats, refresh, jenisList } = useAparList();
 
-  const [selectedJenis, setSelectedJenis] = useState<string | null>(null);
-  const [asc, setAsc] = useState(true);
-  const [showAll, setShowAll] = useState(false);
-  const [isConnected, setIsConnected] = useState(true);
+    const [selectedJenis, setSelectedJenis] = useState<string | null>(null);
+    const [asc, setAsc] = useState(true);
+    const [visibleCount, setVisibleCount] = useState(3); // 👈 TAMBAHAN
+    const [isConnected, setIsConnected] = useState(true);
 
-  // 🔌 Cek koneksi internet
-  useEffect(() => {
-    const unsubscribe = NetInfo.addEventListener(state => {
-      console.log('📶 Status koneksi:', state.isConnected);
-      setIsConnected(state.isConnected === true);
-    });
+    useEffect(() => {
+      const unsubscribe = NetInfo.addEventListener(state => {
+        console.log('📶 Status koneksi:', state.isConnected);
+        setIsConnected(state.isConnected === true);
+      });
 
-    return () => unsubscribe();
-  }, []);
+      return () => unsubscribe();
+    }, []);
 
-  // 🔄 Refresh data saat online
-  useEffect(() => {
-    if (isConnected) {
-      refresh();
-    } else {
-      console.log('⚠️ Offline, memuat dari cache...');
+    useEffect(() => {
+      if (isConnected) {
+        refresh();
+      } else {
+        console.log('⚠️ Offline, memuat dari cache...');
+      }
+    }, [isConnected, refresh]);
+
+    // 🔍 Filter berdasarkan jenis
+    const filtered = useMemo(() => {
+      if (!selectedJenis) return list;
+      const result = list.filter(item => item.jenis_apar === selectedJenis);
+      console.log(`🎯 Filter: ${selectedJenis}, Ditemukan: ${result.length}`);
+      return result;
+    }, [list, selectedJenis]);
+
+    // 🔃 Urutkan
+    const sorted = useMemo(() => {
+      return filtered.slice().sort((a, b) =>
+        asc ? a.daysRemaining - b.daysRemaining : b.daysRemaining - a.daysRemaining
+      );
+    }, [filtered, asc]);
+
+    const dataToRender = sorted.slice(0, visibleCount);
+    const sections = [{ title: 'StatsHeader', data: dataToRender }];
+
+    const renderFooter = useCallback(() => {
+      if (visibleCount >= sorted.length) return null;
+
+      return (
+        <ShowMoreButton onPress={() => setVisibleCount(prev => prev + 3)}>
+          <ShowMoreText>Tampilkan Lebih</ShowMoreText>
+        </ShowMoreButton>
+      );
+    }, [visibleCount, sorted.length]);
+
+    if (loading) {
+      return (
+        <SafeAreaView style={styles.center}>
+          <ActivityIndicator size="large" />
+          <Text>Memuat data APAR...</Text>
+        </SafeAreaView>
+      );
     }
-  }, [isConnected, refresh]);
 
-  // 🔍 Filter berdasarkan jenis
-  const filtered = useMemo(() => {
-    if (!selectedJenis) return [];
-    const result = list.filter(item => item.jenis_apar === selectedJenis);
-    console.log(`🎯 Filter: ${selectedJenis}, Ditemukan: ${result.length}`);
-    return result;
-  }, [list, selectedJenis]);
-
-  // 🔃 Urutkan berdasarkan daysRemaining
-  const sorted = useMemo(() => {
-    const result = filtered.slice().sort((a, b) =>
-      asc ? a.daysRemaining - b.daysRemaining : b.daysRemaining - a.daysRemaining
-    );
-    return result;
-  }, [filtered, asc]);
-
-  const dataToRender = showAll ? sorted : sorted.slice(0, 3);
-  const sections = [{ title: 'StatsHeader', data: dataToRender }];
-
-  const renderFooter = useCallback(() => {
-    if (sorted.length <= 3) return null;
     return (
-      <ShowMoreButton onPress={() => setShowAll(prev => !prev)}>
-        <ShowMoreText>{showAll ? 'Tampilkan Sedikit' : 'Lihat Semua'}</ShowMoreText>
-      </ShowMoreButton>
-    );
-  }, [sorted.length, showAll]);
+      <Container>
+        <Header
+          selectedJenis={selectedJenis}
+          onLogout={() => Alert.alert('Logout', 'Belum diimplementasi')}
+        />
 
-  if (loading) {
-    return (
-      <SafeAreaView style={styles.center}>
-        <ActivityIndicator size="large" />
-        <Text>Memuat data APAR...</Text>
-      </SafeAreaView>
+        {!isConnected && (
+          <View style={styles.offlineBanner}>
+            <Text style={styles.offlineText}>📴 Kamu sedang offline.</Text>
+          </View>
+        )}
+
+        <SectionList
+          sections={sections}
+          keyExtractor={(item, index) => item.id_apar ?? index.toString()}
+          ListHeaderComponent={() => (
+            <>
+              <Stats jenisList={jenisList} onSelectJenis={(val) => {
+                setSelectedJenis(val);
+                setVisibleCount(3); // reset count saat ganti jenis
+              }} />
+              <Options router={router} />
+            </>
+          )}
+          renderSectionHeader={() =>
+            selectedJenis ? (
+              <StatsWrapper>
+                <Controls asc={asc} onToggle={() => setAsc(prev => !prev)} />
+              </StatsWrapper>
+            ) : null
+          }
+          renderItem={({ item }) => (
+            <IndexAparCard
+              item={item}
+              onPressDetails={() =>
+                router.push({ pathname: '/detail', params: { id: item.id_apar } })
+              }
+            />
+          )}
+          ListEmptyComponent={() => (
+            <View style={styles.center}>
+              <Text>
+                {selectedJenis
+                  ? `Tidak ada APAR untuk jenis "${selectedJenis}".`
+                  : 'Silakan pilih jenis APAR terlebih dahulu.'}
+              </Text>
+            </View>
+          )}
+          ListFooterComponent={renderFooter}
+          contentContainerStyle={{ paddingBottom: 16 }}
+          stickySectionHeadersEnabled
+        />
+      </Container>
     );
   }
 
-  return (
-    <Container>
-      <Header
-        selectedJenis={selectedJenis}
-        onLogout={() => Alert.alert('Logout', 'Belum diimplementasi')}
-      />
-
-      {!isConnected && (
-        <View style={styles.offlineBanner}>
-          <Text style={styles.offlineText}>📴 Kamu sedang offline.</Text>
-        </View>
-      )}
-
-      <SectionList
-        sections={sections}
-        keyExtractor={(item, index) => item.id_apar ?? index.toString()}
-        ListHeaderComponent={() => (
-          <>
-            <Stats jenisList={jenisList} onSelectJenis={setSelectedJenis} />
-            <Options router={router} />
-          </>
-        )}
-        renderSectionHeader={() =>
-          selectedJenis ? (
-            <StatsWrapper>
-              {/* <Text style={styles.sectionTitle}>
-                Jenis : {selectedJenis}
-              </Text> */}
-              <Controls asc={asc} onToggle={() => setAsc(prev => !prev)} />
-            </StatsWrapper>
-          ) : null
-        }
-        renderItem={({ item }) => (
-          <IndexAparCard
-            item={item}
-            onPressDetails={() =>
-              router.push({ pathname: '/detail', params: { id: item.id_apar } })
-            }
-          />
-        )}
-        ListEmptyComponent={() => (
-          <View style={styles.center}>
-            <Text>
-              {selectedJenis
-                ? `Tidak ada APAR untuk jenis "${selectedJenis}".`
-                : 'Silakan pilih jenis APAR terlebih dahulu.'}
-            </Text>
-          </View>
-        )}
-        ListFooterComponent={renderFooter}
-        contentContainerStyle={{ paddingBottom: 16 }}
-        stickySectionHeadersEnabled
-      />
-    </Container>
-  );
-}
 
 const styles = StyleSheet.create({
   center: {

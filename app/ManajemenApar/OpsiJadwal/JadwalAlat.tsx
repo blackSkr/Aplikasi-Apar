@@ -1,33 +1,26 @@
-import { IconSymbol } from '@/components/ui/IconSymbol';
+//app/ManajemenApar/OpsiJadwal/JadwalAlat.tsx
 import Colors from '@/constants/Colors';
 import React, { useState } from 'react';
-import { Modal, Pressable, Text } from 'react-native';
+import { Alert, Modal, Pressable, Text } from 'react-native';
 import styled from 'styled-components/native';
 
-const Row = styled.View`
-  flex-direction: row;
-  justify-content: space-between;
-  padding-bottom: 4%;
-`;
-
-const OptionCard = styled.Pressable`
+const Container = styled.View`
   flex: 1;
-  background-color: #fff;
-  margin-horizontal: 8px;
-  padding: 12px;
-  border-radius: 8px;
+  justify-content: center;
   align-items: center;
-  elevation: 2;
-  shadow-color: #000;
-  shadow-opacity: 0.1;
-  shadow-offset: 0px 1px;
-  shadow-radius: 2px;
+  background-color: #f5f5f5;
 `;
 
-const OptionLabel = styled.Text`
-  font-size: 14px;
-  color: ${Colors.text};
-  text-align: center;
+const Button = styled.TouchableOpacity`
+  background-color: ${Colors.primary};
+  padding: 14px 24px;
+  border-radius: 8px;
+`;
+
+const ButtonText = styled.Text`
+  color: #fff;
+  font-size: 16px;
+  font-weight: 600;
 `;
 
 const ModalBackground = styled.View`
@@ -60,25 +53,22 @@ const OptionText = styled.Text`
   font-weight: 500;
 `;
 
-export default function Options() {
+export default function JadwalAlat() {
   const [modalVisible, setModalVisible] = useState(false);
   const [selectedJadwal, setSelectedJadwal] = useState<string | null>(null);
 
-  const handleSelect = (pilihan: string) => {
-    setSelectedJadwal(pilihan);
+  const handleSelect = (bulan: string) => {
+    setSelectedJadwal(bulan);
     setModalVisible(false);
-    alert(`Kamu memilih: ${pilihan}`);
-    // ✅ Di sini bisa simpan ke database atau lanjut ke form lain
+    Alert.alert('Jadwal Dipilih', `Pemeliharaan setiap ${bulan}`);
+    // 👉 Kamu bisa kirim ke backend di sini
   };
 
   return (
-    <>
-      <Row>
-        <OptionCard onPress={() => setModalVisible(true)}>
-          <IconSymbol name="calendar" size={24} color={Colors.primary} />
-          <OptionLabel>Jadwal Pemeliharaan</OptionLabel>
-        </OptionCard>
-      </Row>
+    <Container>
+      <Button onPress={() => setModalVisible(true)}>
+        <ButtonText>{selectedJadwal ? `Jadwal: ${selectedJadwal}` : 'Pilih Jadwal'}</ButtonText>
+      </Button>
 
       <Modal
         transparent
@@ -106,6 +96,6 @@ export default function Options() {
           </ModalBox>
         </ModalBackground>
       </Modal>
-    </>
+    </Container>
   );
 }

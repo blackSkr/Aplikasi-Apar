@@ -24,6 +24,13 @@ const MAPPING = {
   'heart.fill':           'favorite',
   'book.fill':            'book',
   'timer':                'timer',
+  'location.fill':        'location-on',
+  'camera.fill':          'camera',
+  'magnifyingglass':      'search',
+  'person.fill':          'account-circle',
+  'calendar':             'event',
+  'exclamationmark.triangle.fill': 'warning',
+  // 'calendar':             'calendar',
   // Tambahan untuk QR
   'qrcode':               'qr-code',
 } as IconMapping;

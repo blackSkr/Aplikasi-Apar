@@ -215,3 +215,10 @@ export default function AparChecklist() {
     </Container>
   );
 }
+
+
+okey, ak brusan konsul. jdi flow lanjutnya : 
+diawal program aku memang ada membuat popup untuk input badgenumber, ketika petugas sudah mengisi BN dan klik submit -> BN tersimpan di cache dan sistem akan validasi
+dari sisi BE untu check ke db pusat (db yg berbeda) untuk mendapatkan nama dept dan divis, ketika sdh mendapatkan itu -> cek ke table petugas (ddlokalku skrg) untuk dapetin role dari table petugas
+-> ketika telah dpt role maka akan otmatis mendapatkan interval dari table Interval(baru) sesuai dengan identitas dari table petugas
+

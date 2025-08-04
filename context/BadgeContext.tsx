@@ -1,4 +1,3 @@
-//context/BadgeContext.tsx
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import React, {
   createContext,
@@ -24,11 +23,13 @@ const BADGE_TIMESTAMP_KEY = 'BADGE_TIMESTAMP';
 
 interface BadgeContextValue {
   badgeNumber: string;
-  setBadgeNumber: (b: string) => void;
+  setBadgeNumber: (b: string) => Promise<void>;
+  clearBadgeNumber: () => Promise<void>;
 }
 const BadgeContext = createContext<BadgeContextValue>({
   badgeNumber: '',
-  setBadgeNumber: () => {},
+  setBadgeNumber: async () => {},
+  clearBadgeNumber: async () => {},
 });
 
 export const useBadge = () => useContext(BadgeContext);
@@ -41,7 +42,7 @@ function BadgeModal({ onSave }: { onSave: (badge: string) => void }) {
       <View style={styles.overlay}>
         <View style={styles.container}>
           <Image
-            source={require('../assets/images/kpc-logo.png')} 
+            source={require('../assets/images/kpc-logo.png')}
             style={styles.logo}
             resizeMode="contain"
           />
@@ -85,11 +86,7 @@ export const BadgeProvider = ({ children }: { children: ReactNode }) => {
     }
 
     const diff = Date.now() - parseInt(timestamp, 10);
-    
-    // 🔧 GANTI KE 5 * 1000 untuk testing 5 detik
-    const oneHour = 60 * 60 * 1000;
-    // const oneHour = 5 * 1000;
-
+    const oneHour = 60 * 60 * 1000; //Interval Waktu Cache 1 Jam
     if (diff > oneHour) {
       await AsyncStorage.multiRemove([BADGE_KEY, BADGE_TIMESTAMP_KEY]);
       setBadge('');
@@ -105,17 +102,13 @@ export const BadgeProvider = ({ children }: { children: ReactNode }) => {
 
   useEffect(() => {
     const sub = AppState.addEventListener('change', (status: AppStateStatus) => {
-      if (status === 'active') {
-        checkBadgeValidity();
-      }
+      if (status === 'active') checkBadgeValidity();
     });
     return () => sub.remove();
   }, []);
 
   useEffect(() => {
-    const interval = setInterval(() => {
-      checkBadgeValidity();
-    }, 60000); // cek tiap menit
+    const interval = setInterval(checkBadgeValidity, 60_000);
     return () => clearInterval(interval);
   }, []);
 
@@ -129,10 +122,16 @@ export const BadgeProvider = ({ children }: { children: ReactNode }) => {
     setShowModal(false);
   };
 
+  const clearBadgeNumber = async () => {
+    await AsyncStorage.multiRemove([BADGE_KEY, BADGE_TIMESTAMP_KEY]);
+    setBadge('');
+    setShowModal(true);
+  };
+
   if (!ready) return null;
 
   return (
-    <BadgeContext.Provider value={{ badgeNumber, setBadgeNumber }}>
+    <BadgeContext.Provider value={{ badgeNumber, setBadgeNumber, clearBadgeNumber }}>
       {children}
       {showModal && <BadgeModal onSave={setBadgeNumber} />}
     </BadgeContext.Provider>

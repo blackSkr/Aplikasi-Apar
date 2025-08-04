@@ -1,6 +1,6 @@
 import { useNavigation } from '@react-navigation/native';
 import * as ImagePicker from 'expo-image-picker';
-import React, { useEffect, useState } from 'react';
+import React, { Fragment, useEffect, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -16,44 +16,28 @@ import {
 import styled from 'styled-components/native';
 import { useBadge } from '../../context/BadgeContext';
 
-const DUMMY_ID = 116;
-const BASE_URL = Platform.OS === 'android' ? 'http://10.0.2.2:3000' : 'http://localhost:3000';
+const DUMMY_ID = '214';
+const BASE_URL = Platform.OS === 'android'
+  ? 'http://10.0.2.2:3000'
+  : 'http://localhost:3000';
 
 type ChecklistItemState = {
+  checklistId?: number;
   item: string;
   condition: 'Baik' | 'Tidak Baik' | null;
   alasan?: string;
 };
 
-const Container = styled(ScrollView)`flex: 1; background-color: #f9fafb;`;
-const Section = styled(View)`background-color: #fff; margin: 16px; padding: 16px; border-radius: 12px; border: 1px solid #dde1e6;`;
-const Label = styled(Text)`font-size: 14px; color: #4f4f4f; margin-bottom: 4px;`;
-const Input = styled(TextInput)`background-color: #fff; border: 1px solid #dde1e6; border-radius: 8px; padding: 12px; font-size: 15px; color: #212121; margin-bottom: 12px;`;
-const ReadOnlyInput = styled(Input).attrs({ editable: false })`background-color: #f0f0f0;`;
-const ChecklistItemContainer = styled(View)`margin-bottom: 16px;`;
-const ChecklistTitle = styled(Text)`font-size: 15px; font-weight: bold; margin-bottom: 10px;`;
-const ConditionButtons = styled(View)`flex-direction: row; margin-bottom: 12px;`;
-const ConditionButton = styled(Pressable)<{ active: boolean }>`
-  background-color: ${({ active }) => (active ? '#d50000' : '#dde1e6')};
-  padding: 10px 16px;
-  border-radius: 8px;
-  margin-right: 10px;
-`;
-const ConditionButtonText = styled(Text)<{ active: boolean }>`
-  color: ${({ active }) => (active ? '#fff' : '#212121')};
-  font-size: 14px;
-`;
-const Button = styled(Pressable)`background-color: #d50000; padding: 14px; border-radius: 8px; align-items: center; margin: 20px 16px;`;
-const ButtonText = styled(Text)`color: #fff; font-weight: bold; font-size: 16px;`;
-
 export default function AparMaintenance() {
-  const [loading, setLoading] = useState(true);
-  const [checklistStates, setChecklistStates] = useState<ChecklistItemState[]>([]);
-  const [data, setData] = useState<any>(null);
-  const [fotoPemeriksaan, setFotoPemeriksaan] = useState<string[]>([]);
   const navigation = useNavigation();
   const { badgeNumber } = useBadge();
 
+  const [loading, setLoading] = useState(true);
+  const [data, setData] = useState<any>(null);
+  const [checklistStates, setChecklistStates] = useState<ChecklistItemState[]>([]);
+  const [fotoPemeriksaan, setFotoPemeriksaan] = useState<string[]>([]);
+
+  const [intervalLabel, setIntervalLabel] = useState('—');
   const [kondisi, setKondisi] = useState('');
   const [catatanMasalah, setCatatanMasalah] = useState('');
   const [rekomendasi, setRekomendasi] = useState('');
@@ -62,89 +46,119 @@ export default function AparMaintenance() {
   const [jumlahMasalah, setJumlahMasalah] = useState('');
 
   useEffect(() => {
-    const fetchData = async () => {
+    (async () => {
       try {
-        const res = await fetch(`${BASE_URL}/api/peralatan/with-checklist?id=${DUMMY_ID}`);
-        const json = await res.json();
-        const apar = json[0];
-
-        if (!apar) {
+        // 1) Fetch the APAR + checklist JSON
+        const res = await fetch(
+          `${BASE_URL}/api/peralatan/with-checklist?id=${DUMMY_ID}`
+        );
+        const [aparData] = await res.json();
+        if (!aparData) {
           Alert.alert('Data tidak ditemukan');
           return;
         }
+        setData(aparData);
 
-        setData(apar);
+        // 2) Parse keperluan_check (could be: ["q1","q2"] or [{question,checklistId},…] or [{Pertanyaan,Id},…])
+        const raw = aparData.keperluan_check;
+        let arr: any[] = [];
+        if (typeof raw === 'string') {
+          try {
+            arr = JSON.parse(raw);
+          } catch {
+            arr = [];
+          }
+        } else if (Array.isArray(raw)) {
+          arr = raw;
+        }
 
-        const parsedChecklist = parseChecklist(apar.keperluan_check);
+        setChecklistStates(
+          arr.map((o) => {
+            // if it's already an object with a question field
+            if (o && typeof o === 'object') {
+              const question =
+                typeof o.question === 'string'
+                  ? o.question
+                  : typeof o.Pertanyaan === 'string'
+                    ? o.Pertanyaan
+                    : '';
+              const checklistId =
+                typeof o.checklistId === 'number'
+                  ? o.checklistId
+                  : typeof o.Id === 'number'
+                    ? o.Id
+                    : undefined;
+              return {
+                checklistId,
+                item: question,
+                condition: null,
+                alasan: ''
+              };
+            }
+            // fallback if it's just a string
+            return {
+              item: String(o),
+              condition: null,
+              alasan: ''
+            };
+          })
+        );
 
-        setChecklistStates(parsedChecklist.map((item: string) => ({
-          item,
-          condition: null,
-          alasan: '',
-        })));
+        // 3) Show the petugas’s interval label (from the joined IntervalPetugas)
+        if (aparData.namaIntervalPetugas) {
+          setIntervalLabel(
+            `${aparData.namaIntervalPetugas} (${aparData.bulanIntervalPetugas} bln)`
+          );
+        }
       } catch (err) {
-        console.error('Gagal fetch:', err);
+        console.error(err);
         Alert.alert('Gagal ambil data dari server');
       } finally {
         setLoading(false);
       }
-    };
-
-    fetchData();
+    })();
   }, []);
 
-  const parseChecklist = (raw: any): string[] => {
-    if (!raw) return [];
-
-    try {
-      const parsed = typeof raw === 'string' ? JSON.parse(raw) : raw;
-      return Array.isArray(parsed) ? parsed.map((s) => String(s).trim()).filter(Boolean) : [];
-    } catch {
-      return typeof raw === 'string'
-        ? raw.split(/[,;|]/).map((s) => s.trim()).filter(Boolean)
-        : [];
-    }
-  };
-
-  const updateChecklist = (index: number, changes: Partial<ChecklistItemState>) => {
-    const updated = [...checklistStates];
-    updated[index] = { ...updated[index], ...changes };
-    setChecklistStates(updated);
+  const updateChecklist = (
+    index: number,
+    changes: Partial<ChecklistItemState>
+  ) => {
+    setChecklistStates((states) =>
+      states.map((s, i) => (i === index ? { ...s, ...changes } : s))
+    );
   };
 
   const pickImages = async () => {
     const result = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ImagePicker.MediaTypeOptions.Images,
-      allowsMultipleSelection: false,
-      quality: 0.5,
+      quality: 0.5
     });
-
-    if (!result.canceled && result.assets.length > 0) {
-      const newUri = result.assets[0].uri;
-      setFotoPemeriksaan([...fotoPemeriksaan, newUri]);
+    if (!result.canceled) {
+      setFotoPemeriksaan((p) => [...p, result.assets[0].uri]);
     }
   };
 
   const handleSubmit = async () => {
-    for (let i = 0; i < checklistStates.length; i++) {
-      const c = checklistStates[i];
+    if (!badgeNumber) {
+      return Alert.alert('Badge tidak tersedia');
+    }
+
+    // Validate every checklist has a condition (and alasan if needed)
+    for (const c of checklistStates) {
       if (!c.condition || (c.condition === 'Tidak Baik' && !c.alasan)) {
-        Alert.alert('Validasi Gagal', `Lengkapi checklist: ${c.item}`);
-        return;
+        return Alert.alert('Lengkapi semua checklist');
       }
     }
 
-    if (!data || !badgeNumber) {
-      Alert.alert('Data tidak lengkap', 'Pastikan badge sudah diinput.');
-      return;
-    }
-
+    // Prepare form data
     const formData = new FormData();
-    formData.append('aparId', DUMMY_ID.toString());
+    formData.append('aparId', DUMMY_ID);
     formData.append('tanggal', new Date().toISOString());
-    formData.append('checklist', JSON.stringify(checklistStates));
-
     formData.append('badgeNumber', badgeNumber);
+    formData.append(
+      'intervalPetugasId',
+      String(data.intervalPetugasId)
+    );
     formData.append('kondisi', kondisi);
     formData.append('catatanMasalah', catatanMasalah);
     formData.append('rekomendasi', rekomendasi);
@@ -152,117 +166,288 @@ export default function AparMaintenance() {
     formData.append('tekanan', tekanan);
     formData.append('jumlahMasalah', jumlahMasalah);
 
-    const aparCode = data?.no_apar ? data.no_apar.replace(/\s+/g, '_') : 'apar';
-    const timestamp = new Date().toISOString().replace(/[-:T.]/g, '').slice(0, 14);
+    // Checklist answers
+    formData.append(
+      'checklist',
+      JSON.stringify(
+        checklistStates.map((c) => ({
+          checklistId: c.checklistId,
+          condition: c.condition,
+          alasan: c.alasan || ''
+        }))
+      )
+    );
 
+    // Photos
     fotoPemeriksaan.forEach((uri, idx) => {
-      const ext = uri.split('.').pop() || 'jpg';
-      const filename = `FotoPemeriksaanAlat_${aparCode}_${timestamp}_${idx}.${ext}`;
-
+      const name = uri.split('/').pop() || `photo${idx}.jpg`;
       formData.append('fotos', {
         uri,
-        name: filename,
-        type: 'image/jpeg',
+        name,
+        type: 'image/jpeg'
       } as any);
     });
 
     try {
-      const res = await fetch(`${BASE_URL}/api/perawatan/submit`, {
-        method: 'POST',
-        body: formData,
-        headers: {
-          'Content-Type': 'multipart/form-data',
-        },
-      });
-
+      const res = await fetch(
+        `${BASE_URL}/api/perawatan/submit`,
+        {
+          method: 'POST',
+          body: formData,
+          headers: {
+            'Content-Type': 'multipart/form-data'
+          }
+        }
+      );
       const result = await res.json();
-      if (result.success) {
-        Alert.alert('Berhasil', 'Data berhasil dikirim', [
-          { text: 'OK', onPress: () => navigation.goBack() },
-        ]);
-      } else {
-        Alert.alert('Gagal', result.message || 'Server error');
+      if (!res.ok || !result.success) {
+        throw new Error(result.message || 'Server error');
       }
-    } catch (err) {
+      Alert.alert('Sukses', result.message, [
+        { text: 'OK', onPress: () => navigation.goBack() }
+      ]);
+    } catch (err: any) {
       console.error('Gagal kirim data:', err);
-      Alert.alert('Gagal', 'Tidak bisa mengirim data');
+      Alert.alert('Error', err.message);
     }
   };
 
   if (loading) {
     return (
-      <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
+      <Centered>
         <ActivityIndicator size="large" color="#d50000" />
-      </View>
+      </Centered>
     );
   }
 
   return (
-    <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
-      <Container contentContainerStyle={{ paddingBottom: 100 }}>
-        <Section>
+    <KeyboardAvoidingView
+      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+      style={{ flex: 1 }}
+    >
+      <ScrollContainer>
+        {/* APAR Info */}
+        <Card>
           <Label>No FE</Label>
           <ReadOnlyInput value={data.no_apar} />
           <Label>Lokasi</Label>
           <ReadOnlyInput value={data.lokasi_apar} />
           <Label>Jenis</Label>
           <ReadOnlyInput value={data.jenis_apar} />
-        </Section>
+        </Card>
 
-        <Section>
+        {/* Interval (read-only) */}
+        <Card>
+          <Label>Jenis Inspeksi</Label>
+          <ReadOnlyInput value={intervalLabel} />
+        </Card>
+
+        {/* Hasil */}
+        <Card>
           <Label>Kondisi</Label>
-          <Input placeholder="Contoh: Baik" value={kondisi} onChangeText={setKondisi} />
+          <Input
+            placeholder="Contoh: Baik"
+            value={kondisi}
+            onChangeText={setKondisi}
+          />
           <Label>Catatan Masalah</Label>
-          <Input placeholder="..." value={catatanMasalah} onChangeText={setCatatanMasalah} />
+          <Input
+            placeholder="…"
+            value={catatanMasalah}
+            onChangeText={setCatatanMasalah}
+          />
           <Label>Rekomendasi</Label>
-          <Input placeholder="..." value={rekomendasi} onChangeText={setRekomendasi} />
+          <Input
+            placeholder="…"
+            value={rekomendasi}
+            onChangeText={setRekomendasi}
+          />
           <Label>Tindak Lanjut</Label>
-          <Input placeholder="..." value={tindakLanjut} onChangeText={setTindakLanjut} />
+          <Input
+            placeholder="…"
+            value={tindakLanjut}
+            onChangeText={setTindakLanjut}
+          />
           <Label>Tekanan</Label>
-          <Input placeholder="Contoh: 12.3" keyboardType="numeric" value={tekanan} onChangeText={setTekanan} />
+          <Input
+            placeholder="Contoh: 12.3"
+            keyboardType="numeric"
+            value={tekanan}
+            onChangeText={setTekanan}
+          />
           <Label>Jumlah Masalah</Label>
-          <Input placeholder="Contoh: 2" keyboardType="numeric" value={jumlahMasalah} onChangeText={setJumlahMasalah} />
-        </Section>
+          <Input
+            placeholder="Contoh: 2"
+            keyboardType="numeric"
+            value={jumlahMasalah}
+            onChangeText={setJumlahMasalah}
+          />
+        </Card>
 
-        <Section>
-          <Text style={{ fontSize: 16, fontWeight: 'bold', marginBottom: 16 }}>Checklist</Text>
-          {checklistStates.map((check, index) => (
-            <ChecklistItemContainer key={index}>
-              <ChecklistTitle>{check.item}</ChecklistTitle>
-              <ConditionButtons>
-                <ConditionButton active={check.condition === 'Baik'} onPress={() => updateChecklist(index, { condition: 'Baik', alasan: '' })}>
-                  <ConditionButtonText active={check.condition === 'Baik'}>Baik</ConditionButtonText>
-                </ConditionButton>
-                <ConditionButton active={check.condition === 'Tidak Baik'} onPress={() => updateChecklist(index, { condition: 'Tidak Baik' })}>
-                  <ConditionButtonText active={check.condition === 'Tidak Baik'}>Tidak Baik</ConditionButtonText>
-                </ConditionButton>
-              </ConditionButtons>
-              {check.condition === 'Tidak Baik' && (
-                <Input placeholder="Masukkan alasan" value={check.alasan} onChangeText={(text) => updateChecklist(index, { alasan: text })} />
+        {/* Checklist */}
+        <Card>
+          <Label>Checklist</Label>
+          {checklistStates.map((c, idx) => (
+            <Fragment key={idx}>
+              <QuestionText>{c.item}</QuestionText>
+              <ButtonRow>
+                <ToggleButton
+                  active={c.condition === 'Baik'}
+                  onPress={() =>
+                    updateChecklist(idx, { condition: 'Baik', alasan: '' })
+                  }
+                >
+                  <ToggleText active={c.condition === 'Baik'}>
+                    Baik
+                  </ToggleText>
+                </ToggleButton>
+                <ToggleButton
+                  active={c.condition === 'Tidak Baik'}
+                  onPress={() =>
+                    updateChecklist(idx, { condition: 'Tidak Baik' })
+                  }
+                >
+                  <ToggleText active={c.condition === 'Tidak Baik'}>
+                    Tidak Baik
+                  </ToggleText>
+                </ToggleButton>
+              </ButtonRow>
+              {c.condition === 'Tidak Baik' && (
+                <Input
+                  placeholder="Masukkan alasan"
+                  value={c.alasan}
+                  onChangeText={(t) =>
+                    updateChecklist(idx, { alasan: t })
+                  }
+                />
               )}
-            </ChecklistItemContainer>
+            </Fragment>
           ))}
-        </Section>
+        </Card>
 
-        <Section>
-          <Text style={{ fontSize: 16, fontWeight: 'bold', marginBottom: 16 }}>Foto Pemeriksaan</Text>
-          <Pressable style={{ backgroundColor: '#dde1e6', padding: 10, borderRadius: 6, alignItems: 'center', marginBottom: 10 }} onPress={pickImages}>
-            <Text style={{ color: '#212121' }}>Upload Foto</Text>
+        {/* Foto Pemeriksaan */}
+        <Card>
+          <Label>Foto Pemeriksaan</Label>
+          <Pressable style={uploadStyle} onPress={pickImages}>
+            <Text>Unggah Foto</Text>
           </Pressable>
-          <ScrollView horizontal>
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+          >
             {fotoPemeriksaan.map((uri, i) => (
-              <View key={i} style={{ marginRight: 10, alignItems: 'center' }}>
-                <Image source={{ uri }} style={{ width: 100, height: 100, borderRadius: 8, marginBottom: 4 }} />
-                <Text style={{ fontSize: 12 }}>{data.no_apar}</Text>
-              </View>
+              <Image
+                key={i}
+                source={{ uri }}
+                style={{
+                  width: 100,
+                  height: 100,
+                  borderRadius: 6,
+                  marginRight: 8
+                }}
+              />
             ))}
           </ScrollView>
-        </Section>
+        </Card>
 
-        <Button onPress={handleSubmit}>
-          <ButtonText>Simpan Perawatan</ButtonText>
-        </Button>
-      </Container>
+        <SubmitButton onPress={handleSubmit}>
+          <SubmitText>Simpan Perawatan</SubmitText>
+        </SubmitButton>
+      </ScrollContainer>
     </KeyboardAvoidingView>
   );
 }
+
+// Styled Components
+
+const Centered = styled(View)`
+  flex: 1;
+  justify-content: center;
+  align-items: center;
+`;
+
+const ScrollContainer = styled(ScrollView)`
+  flex: 1;
+  background-color: #f9fafb;
+  padding-bottom: 40px;
+`;
+
+const Card = styled(View)`
+  background: #fff;
+  margin: 12px 16px;
+  padding: 16px;
+  border-radius: 8px;
+  elevation: 1;
+`;
+
+const Label = styled(Text)`
+  font-size: 14px;
+  color: #555;
+  margin-bottom: 8px;
+`;
+
+const ReadOnlyInput = styled(TextInput).attrs({
+  editable: false
+})`
+  background: #eee;
+  padding: 10px;
+  border-radius: 6px;
+  margin-bottom: 12px;
+  color: #333;
+`;
+
+const Input = styled(TextInput)`
+  background: #fff;
+  border: 1px solid #ddd;
+  padding: 10px;
+  border-radius: 6px;
+  margin-bottom: 12px;
+  color: #333;
+`;
+
+const QuestionText = styled(Text)`
+  font-size: 15px;
+  font-weight: 500;
+  margin-bottom: 8px;
+`;
+
+const ButtonRow = styled(View)`
+  flex-direction: row;
+  margin-bottom: 12px;
+`;
+
+const ToggleButton = styled(Pressable)<{ active: boolean }>`
+  flex: 1;
+  background-color: ${({ active }) => (active ? '#d50000' : '#eee')};
+  padding: 10px;
+  border-radius: 6px;
+  align-items: center;
+  margin-right: ${({ active }) => (active ? '0' : '8px')};
+`;
+
+const ToggleText = styled(Text)<{ active: boolean }>`
+  color: ${({ active }) => (active ? '#fff' : '#333')};
+  font-weight: 500;
+`;
+
+const uploadStyle = {
+  backgroundColor: '#eee',
+  padding: 10,
+  borderRadius: 6,
+  alignItems: 'center',
+  marginBottom: 12
+};
+
+const SubmitButton = styled(Pressable)`
+  background: #d50000;
+  padding: 16px;
+  margin: 20px 16px;
+  border-radius: 8px;
+  align-items: center;
+`;
+
+const SubmitText = styled(Text)`
+  color: #fff;
+  font-size: 16px;
+  font-weight: bold;
+`;

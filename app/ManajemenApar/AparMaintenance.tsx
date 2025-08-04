@@ -1,5 +1,3 @@
-//app/manajemenApar/AparMaintenance.tsx
-
 import { useNavigation } from '@react-navigation/native';
 import * as ImagePicker from 'expo-image-picker';
 import React, { Fragment, useEffect, useState } from 'react';
@@ -18,7 +16,7 @@ import {
 import styled from 'styled-components/native';
 import { useBadge } from '../../context/BadgeContext';
 
-const DUMMY_ID = '214';
+const DUMMY_ID = '8';
 const BASE_URL = Platform.OS === 'android'
   ? 'http://10.0.2.2:3000'
   : 'http://localhost:3000';
@@ -37,13 +35,13 @@ type AparData = {
   jenis_apar: string;
   current_petugas_id: number;
   intervalPetugasId: number | null;
-  namaIntervalPetugas: string;
-  bulanIntervalPetugas: number;
-  defaultIntervalBulan: number;
-  interval_maintenance: number;
-  last_inspection_date: string | null;
-  nextDueDate: string | null;
-  keperluan_check: string;
+  namaIntervalPetugas?: string;
+  bulanIntervalPetugas?: number;
+  defaultIntervalBulan?: number;
+  interval_maintenance?: number;
+  last_inspection_date?: string | null;
+  nextDueDate?: string | null;
+  keperluan_check: any;
 };
 
 export default function AparMaintenance() {
@@ -66,85 +64,75 @@ export default function AparMaintenance() {
 
   useEffect(() => {
     (async () => {
+      setLoading(true);
       try {
-        // 1) Fetch APAR data dengan badge petugas
+        console.log('--- DEBUG FETCH ---');
+        console.log('Badge FE:', badgeNumber);
+        console.log('URL FETCH:', `${BASE_URL}/api/peralatan/with-checklist?id=${DUMMY_ID}&badge=${encodeURIComponent(badgeNumber || '')}`);
         const res = await fetch(
           `${BASE_URL}/api/peralatan/with-checklist?id=${DUMMY_ID}&badge=${encodeURIComponent(badgeNumber || '')}`
         );
-        
         if (!res.ok) {
+          const text = await res.text();
+          console.log('BAD RESPONSE:', text);
           throw new Error(`HTTP ${res.status}: ${res.statusText}`);
         }
-        
-        const result = await res.json();
-        const aparData = result[0] as AparData;
-        
+
+        const aparData = await res.json();
+        console.log('APAR DATA:', aparData);
+
         if (!aparData) {
           Alert.alert('Error', 'Data peralatan tidak ditemukan');
           return;
         }
-        
-        console.log('🔍 APAR Data received:', {
-          id: aparData.id_apar,
-          kode: aparData.no_apar,
-          petugasId: aparData.current_petugas_id,
-          intervalPetugasId: aparData.intervalPetugasId,
-          namaInterval: aparData.namaIntervalPetugas,
-          bulanInterval: aparData.bulanIntervalPetugas
-        });
-        
+
         setData(aparData);
 
-        // 2) Parse checklist
-        const raw = aparData.keperluan_check;
+        // Parse checklist
         let arr: any[] = [];
+        const raw = aparData.keperluan_check;
         if (typeof raw === 'string') {
           try {
             arr = JSON.parse(raw);
-          } catch {
+          } catch (e) {
+            console.log('Checklist PARSE ERROR:', e, raw);
             arr = [];
           }
         } else if (Array.isArray(raw)) {
           arr = raw;
         }
+        console.log('Checklist Parsed:', arr);
 
         setChecklistStates(
           arr.map((o) => {
-            if (o && typeof o === 'object') {
-              const question =
-                typeof o.question === 'string'
-                  ? o.question
-                  : typeof o.Pertanyaan === 'string'
-                    ? o.Pertanyaan
-                    : '';
-              const checklistId =
-                typeof o.checklistId === 'number'
-                  ? o.checklistId
-                  : typeof o.Id === 'number'
-                    ? o.Id
-                    : undefined;
-              return {
-                checklistId,
-                item: question,
-                condition: null,
-                alasan: ''
-              };
-            }
+            const question =
+              typeof o.question === 'string'
+                ? o.question
+                : typeof o.Pertanyaan === 'string'
+                ? o.Pertanyaan
+                : '';
+            const checklistId =
+              typeof o.checklistId === 'number'
+                ? o.checklistId
+                : typeof o.Id === 'number'
+                ? o.Id
+                : undefined;
             return {
-              item: String(o),
+              checklistId,
+              item: question,
               condition: null,
               alasan: ''
             };
           })
         );
 
-        // 3) Set interval label
+        // Interval label
         if (aparData.namaIntervalPetugas && aparData.bulanIntervalPetugas) {
           setIntervalLabel(
             `${aparData.namaIntervalPetugas} (${aparData.bulanIntervalPetugas} bulan)`
           );
         } else {
-          setIntervalLabel(`Default (${aparData.defaultIntervalBulan} bulan)`);
+          setIntervalLabel(`Default (${aparData.defaultIntervalBulan ?? '-'} bulan)`);
         }
 
       } catch (err) {
@@ -173,6 +161,7 @@ export default function AparMaintenance() {
     });
     if (!result.canceled) {
       setFotoPemeriksaan((prev) => [...prev, result.assets[0].uri]);
+      console.log('Picked Images:', result.assets[0].uri);
     }
   };
 
@@ -191,18 +180,13 @@ export default function AparMaintenance() {
     setSubmitting(true);
 
     try {
-      // Prepare form data
       const formData = new FormData();
       formData.append('aparId', String(data.id_apar));
       formData.append('tanggal', new Date().toISOString());
       formData.append('badgeNumber', badgeNumber);
-      
-      // IMPORTANT: Gunakan intervalPetugasId dari data yang diterima
-      if (data.intervalPetugasId) {
+
+      if (data.intervalPetugasId !== undefined && data.intervalPetugasId !== null) {
         formData.append('intervalPetugasId', String(data.intervalPetugasId));
-        console.log('✅ Using intervalPetugasId:', data.intervalPetugasId);
-      } else {
-        console.log('⚠️ No intervalPetugasId, akan menggunakan default dari petugas');
       }
 
       formData.append('kondisi', kondisi);
@@ -212,7 +196,6 @@ export default function AparMaintenance() {
       formData.append('tekanan', tekanan);
       formData.append('jumlahMasalah', jumlahMasalah);
 
-      // Checklist answers
       formData.append(
         'checklist',
         JSON.stringify(
@@ -224,23 +207,22 @@ export default function AparMaintenance() {
         )
       );
 
-      // Photos
       fotoPemeriksaan.forEach((uri, idx) => {
-        const name = uri.split('/').pop() || `photo${idx}.jpg`;
+        let fileType = uri.split('.').pop();
+        let name = `photo${idx}.${fileType || 'jpg'}`;
         formData.append('fotos', {
           uri,
           name,
-          type: 'image/jpeg'
+          type: `image/${fileType || 'jpeg'}`
         } as any);
       });
 
-      console.log('📤 Submitting maintenance with data:', {
-        aparId: data.id_apar,
-        badgeNumber,
-        intervalPetugasId: data.intervalPetugasId,
-        checklistCount: checklistStates.length,
-        photoCount: fotoPemeriksaan.length
-      });
+      // DEBUG: Print FormData (stringify)
+      for (let pair of (formData as any)._parts || []) {
+        console.log('FORMDATA PART:', pair[0], pair[1]);
+      }
+
+      console.log('--- SUBMIT TO:', `${BASE_URL}/api/perawatan/submit`);
 
       const res = await fetch(`${BASE_URL}/api/perawatan/submit`, {
         method: 'POST',
@@ -251,24 +233,15 @@ export default function AparMaintenance() {
       });
 
       const result = await res.json();
-      
-      console.log('📥 Server response:', result);
+      console.log('SUBMIT RESPONSE:', result);
 
       if (!res.ok || !result.success) {
         throw new Error(result.message || 'Server error');
       }
 
-      // Cek struktur response untuk debugging
-      console.log('📥 Full server response:', JSON.stringify(result, null, 2));
-
-      const responseData = result.data || {};
-      
       Alert.alert(
         'Berhasil',
-        `Maintenance berhasil disimpan!\n\n` +
-        `APAR: ${responseData.aparKode || data.no_apar || 'N/A'}\n` +
-        `Interval: ${responseData.intervalNama || 'N/A'} ${responseData.intervalBulan ? `(${responseData.intervalBulan} bulan)` : ''}\n` +
-        `Next Due: ${responseData.nextDueDate ? new Date(responseData.nextDueDate).toLocaleDateString('id-ID') : 'N/A'}`,
+        'Maintenance berhasil disimpan!',
         [
           { text: 'OK', onPress: () => navigation.goBack() }
         ]
@@ -315,37 +288,25 @@ export default function AparMaintenance() {
           <ReadOnlyInput value={data.lokasi_apar} />
           <Label>Jenis</Label>
           <ReadOnlyInput value={data.jenis_apar} />
-          
-          {/* Debug info */}
-          {__DEV__ && (
-            <>
-              <Label style={{ color: '#999', fontSize: 12 }}>
-                Debug: Petugas ID = {data.current_petugas_id}, 
-                Interval ID = {data.intervalPetugasId || 'null'}
-              </Label>
-            </>
-          )}
         </Card>
 
         {/* Interval Info */}
         <Card>
           <Label>Jenis Inspeksi</Label>
           <ReadOnlyInput value={intervalLabel} />
-          
           {data.last_inspection_date && (
             <>
               <Label>Inspeksi Terakhir</Label>
-              <ReadOnlyInput 
-                value={new Date(data.last_inspection_date).toLocaleDateString('id-ID')} 
+              <ReadOnlyInput
+                value={new Date(data.last_inspection_date).toLocaleDateString('id-ID')}
               />
             </>
           )}
-          
           {data.nextDueDate && (
             <>
               <Label>Target Inspeksi Berikutnya</Label>
-              <ReadOnlyInput 
-                value={new Date(data.nextDueDate).toLocaleDateString('id-ID')} 
+              <ReadOnlyInput
+                value={new Date(data.nextDueDate).toLocaleDateString('id-ID')}
               />
             </>
           )}
@@ -359,7 +320,6 @@ export default function AparMaintenance() {
             value={kondisi}
             onChangeText={setKondisi}
           />
-          
           <Label>Catatan Masalah</Label>
           <Input
             placeholder="Deskripsikan masalah yang ditemukan..."
@@ -368,7 +328,6 @@ export default function AparMaintenance() {
             multiline
             numberOfLines={3}
           />
-          
           <Label>Rekomendasi</Label>
           <Input
             placeholder="Saran tindakan yang perlu dilakukan..."
@@ -377,7 +336,6 @@ export default function AparMaintenance() {
             multiline
             numberOfLines={3}
           />
-          
           <Label>Tindak Lanjut</Label>
           <Input
             placeholder="Rencana tindak lanjut..."
@@ -386,7 +344,6 @@ export default function AparMaintenance() {
             multiline
             numberOfLines={2}
           />
-          
           <Label>Tekanan (bar)</Label>
           <Input
             placeholder="Contoh: 12.5"
@@ -394,7 +351,6 @@ export default function AparMaintenance() {
             value={tekanan}
             onChangeText={setTekanan}
           />
-          
           <Label>Jumlah Masalah</Label>
           <Input
             placeholder="Contoh: 0, 1, 2"
@@ -509,8 +465,7 @@ export default function AparMaintenance() {
   );
 }
 
-// Styled Components
-
+// --- Styled Components sama seperti kode kamu ---
 const Centered = styled(View)`
   flex: 1;
   justify-content: center;
@@ -598,11 +553,11 @@ const uploadStyle = {
   backgroundColor: '#f3f4f6',
   padding: 16,
   borderRadius: 6,
-  alignItems: 'center' as const,
+  alignItems: 'center',
   marginBottom: 12,
   borderWidth: 2,
   borderColor: '#d1d5db',
-  borderStyle: 'dashed' as const
+  borderStyle: 'dashed'
 };
 
 const SubmitButton = styled(Pressable)<{ disabled?: boolean }>`

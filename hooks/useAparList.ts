@@ -2,7 +2,7 @@ import { useBadge } from '@/context/BadgeContext';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import Constants from 'expo-constants';
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Alert, Platform } from 'react-native';
+import { Alert } from 'react-native';
 
 export type MaintenanceStatus = 'Belum' | 'Sudah';
 
@@ -28,10 +28,12 @@ export function useAparList() {
   const [rawData, setRawData] = useState<AparRaw[]>([]);
 
   const manifest = Constants.manifest || (Constants as any).expoConfig;
-  const host = Platform.OS === 'android'
-    ? '10.0.2.2'
-    : manifest?.debuggerHost?.split(':')[0] || 'localhost';
-  const baseUrl = `http://${host}:3000`;
+  // const host = Platform.OS === 'android'
+  //   ? '10.0.2.2'
+  //   : manifest?.debuggerHost?.split(':')[0] || 'localhost';
+  // const baseUrl = `http://${host}:3000`;
+  const baseUrl = 'http://172.16.34.189:3000'; // <-- Ganti dengan IP sesuai ipconfig
+
 
   const fetchData = useCallback(async () => {
     if (!badgeNumber) {

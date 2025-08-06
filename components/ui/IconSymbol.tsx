@@ -34,6 +34,9 @@ const MAPPING = {
   'checkmark.circle':    'check-circle',
   'location':            'location-on',  // ← TAMBAHKAN INI!
   'arrow.counterclockwise': 'refresh',
+  'ellipsis':             'more-vert',
+  'clock.fill':          'access-time',
+  'flame.fill':          'local-fire-department',
   // 'calendar':             'calendar',
   // Tambahan untuk QR
   'qrcode':               'qr-code',

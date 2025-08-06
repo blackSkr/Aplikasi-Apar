@@ -1,37 +1,35 @@
 // app/(tabs)/ScanQr.tsx
-import React, { useState } from 'react';
-import { StatusBar, Text, StyleSheet } from 'react-native';
-import { CameraView, useCameraPermissions } from 'expo-camera';
-import { Ionicons } from '@expo/vector-icons';
-import { useRouter } from 'expo-router';
-import styled from 'styled-components/native';
 import Colors from '@/constants/Colors';
+import { useBadge } from '@/context/BadgeContext';
+import { Ionicons } from '@expo/vector-icons';
+import { CameraView, useCameraPermissions } from 'expo-camera';
+import { useRouter } from 'expo-router';
+import React, { useState } from 'react';
+import { Alert, StatusBar, StyleSheet, Text } from 'react-native';
+import styled from 'styled-components/native';
 
 const ScanQr: React.FC = () => {
   const router = useRouter();
+  const { badgeNumber } = useBadge();
 
-  // 1) Gunakan hook izin kamera
   const [permission, requestPermission] = useCameraPermissions();
   const [scanned, setScanned] = useState(false);
   const [qrData, setQrData] = useState<string>('');
 
-  // 2) Handler hasil scan
   const handleBarcodeScanned = ({ data }: { data: string }) => {
     setScanned(true);
     setQrData(data);
   };
 
-  // 3) UI untuk izin
   if (!permission) {
-    // masih loading izin
     return (
       <Centered>
         <Text>Meminta izin kamera…</Text>
       </Centered>
     );
   }
+
   if (!permission.granted) {
-    // belum grant → tombol request
     return (
       <Centered>
         <Text>Butuh izin kamera untuk scan QR.</Text>
@@ -42,7 +40,6 @@ const ScanQr: React.FC = () => {
     );
   }
 
-  // 4) UI scan
   return (
     <Wrapper>
       <StatusBar barStyle="light-content" backgroundColor={Colors.primaryheader} />
@@ -55,7 +52,6 @@ const ScanQr: React.FC = () => {
         <ScannerContainer>
           <CameraView
             style={StyleSheet.absoluteFill}
-            // pakai onBarcodeScanned, bukan onBarCodeScanned!
             onBarcodeScanned={scanned ? undefined : handleBarcodeScanned}
           />
           {!scanned ? (
@@ -79,7 +75,21 @@ const ScanQr: React.FC = () => {
         </Instruction>
 
         <PrimaryButton
-          onPress={() => router.push(`/checklist/${encodeURIComponent(qrData)}`)}
+          onPress={() => {
+            try {
+              const parsed = JSON.parse(qrData);
+              const token = parsed.id;
+
+              if (!token || !badgeNumber) {
+                Alert.alert('QR tidak valid', 'Token atau badge tidak tersedia.');
+                return;
+              }
+
+              router.push(`/apar/MaintenanceApar?token=${encodeURIComponent(token)}&badge=${encodeURIComponent(badgeNumber)}`);
+            } catch {
+              Alert.alert('QR tidak dikenali', 'Format QR harus JSON yang valid.');
+            }
+          }}
           disabled={!scanned}
           activeOpacity={0.8}
         >
@@ -133,7 +143,7 @@ const Overlay = styled.View`
   left: 0;
   justify-content: center;
   align-items: center;
-  background-color: rgba(0,0,0,0.4);
+  background-color: rgba(0, 0, 0, 0.4);
 `;
 
 const HintText = styled.Text`

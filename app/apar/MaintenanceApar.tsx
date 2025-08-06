@@ -1,6 +1,6 @@
-// app/apar/MaintenanceApar.tsx
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as ImagePicker from 'expo-image-picker';
+import { useLocalSearchParams } from 'expo-router';
 import React, { useEffect, useState } from 'react';
 import {
   ActivityIndicator,
@@ -18,9 +18,6 @@ import {
 import styled from 'styled-components/native';
 import { useBadge } from '../../context/BadgeContext';
 
-// Dummy data & constants
-const DUMMY_ID = 'AP2003';
-const CACHE_KEY = `cached-apar-${DUMMY_ID}`;
 const COLORS = {
   primary: '#D50000',
   background: '#F9FAFB',
@@ -33,12 +30,12 @@ const COLORS = {
 
 type ChecklistItemState = {
   item: string;
+  checklistId: number;
   condition: 'Baik' | 'Tidak Baik' | null;
   alasan?: string;
   fotoUris?: string[];
 };
 
-// Styled Components
 const Container = styled(ScrollView)`flex: 1; background-color: ${COLORS.background};`;
 const Section = styled(View)`background-color: #fff; margin: 16px; padding: 16px; border-radius: 12px; border: 1px solid ${COLORS.border};`;
 const Label = styled(Text)`font-size: 14px; color: ${COLORS.label}; margin-bottom: 4px;`;
@@ -64,7 +61,11 @@ const UploadText = styled(Text)`color: #fff; font-weight: bold;`;
 const Thumbnail = styled(Image)`width: 80px; height: 80px; border-radius: 6px; margin-right: 10px;`;
 
 export default function MaintenanceApar() {
-  const { badgeNumber } = useBadge();
+  const { token, badge } = useLocalSearchParams();
+  const { badgeNumber: contextBadge } = useBadge();
+  const badgeNumber = contextBadge || (badge as string) || '';
+
+  const CACHE_KEY = `cached-apar-${token}`;
   const [loading, setLoading] = useState(true);
   const [checklistStates, setChecklistStates] = useState<ChecklistItemState[]>([]);
   const [location, setLocation] = useState('');
@@ -78,49 +79,67 @@ export default function MaintenanceApar() {
   const [remark, setRemark] = useState('');
 
   useEffect(() => {
-    const loadCachedData = async () => {
+    const loadData = async () => {
       try {
-        const cached = await AsyncStorage.getItem(CACHE_KEY);
-        if (!cached) {
-          Alert.alert('Data Tidak Ditemukan', 'APAR ini belum pernah diakses online.');
+        if (!token || !badgeNumber) {
+          Alert.alert('Error', 'Token atau badge tidak tersedia.');
           return;
         }
 
-        const data = JSON.parse(cached);
-        const items = parseChecklist(data.keperluan_check);
+        const res = await fetch(`http://localhost:3000/api/perawatan/with-checklist/by-token?token=${token}&badge=${badgeNumber}`);
+        const json = await res.json();
 
-        setChecklistStates(
-          items.map((item: string) => ({
-            item,
+        if (!json || !json.id_apar) {
+          Alert.alert('Error', 'Data APAR tidak ditemukan.');
+          return;
+        }
+
+        await AsyncStorage.setItem(CACHE_KEY, JSON.stringify(json));
+
+        const items = JSON.parse(json.keperluan_check || '[]');
+        setChecklistStates(items.map((item: any) => ({
+          item: item.Pertanyaan,
+          checklistId: item.checklistId,
+          condition: null,
+          alasan: '',
+          fotoUris: [],
+        })));
+
+        setLocation(json.lokasi_apar || '');
+        setNoFE(json.no_apar || '');
+        setTypeFE(json.jenis_apar || '');
+        setPic(json.pic || '');
+
+      } catch (err) {
+        const cached = await AsyncStorage.getItem(CACHE_KEY);
+        if (cached) {
+          const json = JSON.parse(cached);
+          const items = JSON.parse(json.keperluan_check || '[]');
+
+          setChecklistStates(items.map((item: any) => ({
+            item: item.Pertanyaan,
+            checklistId: item.checklistId,
             condition: null,
             alasan: '',
             fotoUris: [],
-          }))
-        );
+          })));
 
-        setLocation(data.lokasi_apar || '');
-        setNoFE(data.no_apar || '');
-        setTypeFE(data.jenis_apar || '');
-      } catch (err) {
-        Alert.alert('Error', 'Gagal memuat data dari cache.');
+          setLocation(json.lokasi_apar || '');
+          setNoFE(json.no_apar || '');
+          setTypeFE(json.jenis_apar || '');
+          setPic(json.pic || '');
+
+          Alert.alert('Offline Mode', 'Menggunakan data cache.');
+        } else {
+          Alert.alert('Error', 'Gagal mengambil data online maupun cache.');
+        }
       } finally {
         setLoading(false);
       }
     };
 
-    loadCachedData();
+    loadData();
   }, []);
-
-  const parseChecklist = (raw: any): string[] => {
-    try {
-      const parsed = JSON.parse(raw);
-      return Array.isArray(parsed) ? parsed : [];
-    } catch {
-      return typeof raw === 'string'
-        ? raw.split(';').map((s) => s.trim()).filter(Boolean)
-        : [];
-    }
-  };
 
   const updateChecklist = (index: number, changes: Partial<ChecklistItemState>) => {
     const updated = [...checklistStates];
@@ -142,7 +161,7 @@ export default function MaintenanceApar() {
   };
 
   const handleSubmit = async () => {
-    if (!badgeNumber || !location || !pic || checklistStates.length === 0) {
+    if (!badgeNumber || !location || !checklistStates.length) {
       return Alert.alert('Error', 'Mohon lengkapi semua data.');
     }
 
@@ -156,7 +175,7 @@ export default function MaintenanceApar() {
 
     const maintenanceData = {
       id: `offline-${Date.now()}`,
-      aparId: DUMMY_ID,
+      aparId: token,
       badgeNumber,
       location,
       pic,
@@ -167,7 +186,11 @@ export default function MaintenanceApar() {
       feTrouble,
       recommendation,
       remark,
-      checklist: checklistStates,
+      checklist: checklistStates.map(c => ({
+        checklistId: c.checklistId,
+        condition: c.condition,
+        alasan: c.alasan || '',
+      })),
       createdAt: new Date().toISOString(),
       status: 'pending',
     };
@@ -194,7 +217,6 @@ export default function MaintenanceApar() {
   return (
     <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
       <Container contentContainerStyle={{ paddingBottom: 100 }}>
-        {/* Informasi Umum */}
         <Section>
           <Label>Badge Number</Label>
           <ReadOnlyInput value={badgeNumber} />
@@ -227,7 +249,6 @@ export default function MaintenanceApar() {
           <Input value={remark} onChangeText={setRemark} multiline style={{ height: 80 }} />
         </Section>
 
-        {/* Checklist */}
         <Section>
           <Text style={{ fontSize: 16, fontWeight: 'bold', marginBottom: 16 }}>Checklist</Text>
           {checklistStates.map((check, index) => (

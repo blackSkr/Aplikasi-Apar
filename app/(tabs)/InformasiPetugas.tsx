@@ -281,12 +281,16 @@ export default function InformasiAlat() {
       const dueDate = new Date(item.nextDueDate);
       return dueDate.getMonth() === currentMonth && dueDate.getFullYear() === currentYear;
     }).length,
-    sudahMaintenanceBulanIni: list.filter(item => {
-      if (!item.nextDueDate) return false;
-      const lastMaintenanceDate = new Date(item.nextDueDate);
-      lastMaintenanceDate.setMonth(lastMaintenanceDate.getMonth() - (item.interval_maintenance || 1));
-      return lastMaintenanceDate.getMonth() === currentMonth && lastMaintenanceDate.getFullYear() === currentYear;
-    }).length,
+  sudahMaintenanceBulanIni: list.filter(item => {
+    if (!item.tgl_terakhir_maintenance) return false;
+
+    const lastDate = new Date(item.tgl_terakhir_maintenance);
+    return (
+      lastDate.getMonth() === currentMonth &&
+      lastDate.getFullYear() === currentYear
+    );
+  }).length,
+
   };
 
   // Get petugas location from first APAR (assuming all APAR for this petugas are in same location)

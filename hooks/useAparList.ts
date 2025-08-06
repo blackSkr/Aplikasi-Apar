@@ -1,5 +1,7 @@
 // hooks/useAparList.ts
+
 import { useBadge } from '@/context/BadgeContext';
+import { safeFetchOffline } from '@/utils/ManajemenOffline'; // ← import
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import Constants from 'expo-constants';
 import { useCallback, useEffect, useMemo, useState } from 'react';
@@ -7,24 +9,8 @@ import { Alert, Platform } from 'react-native';
 
 export type MaintenanceStatus = 'Belum' | 'Sudah';
 
-export interface AparRaw {
-  id_apar: string;
-  no_apar: string;
-  lokasi_apar: string;
-  jenis_apar: string;
-  statusMaintenance: MaintenanceStatus;
-  interval_maintenance: number;      // hari
-  nextDueDate: string;               // ISO string atau ''
-  last_inspection?: string;          // ISO string atau undefined
-  tanggal_selesai?: string;          // ISO string atau undefined
-  // petugas nggak tersedia di basic route
-    badge_petugas?: string;    // ← baru
-
-}
-
-export interface APAR extends AparRaw {
-  daysRemaining: number;
-}
+export interface AparRaw { /* ... */ }
+export interface APAR extends AparRaw { daysRemaining: number; }
 
 export function useAparList() {
   const { badgeNumber, clearBadgeNumber } = useBadge();
@@ -32,9 +18,10 @@ export function useAparList() {
   const [rawData, setRawData] = useState<AparRaw[]>([]);
 
   const manifest = Constants.manifest || (Constants as any).expoConfig;
-  const host = Platform.OS === 'android'
-    ? '10.0.2.2'
-    : manifest?.debuggerHost?.split(':')[0] || 'localhost';
+  const host =
+    Platform.OS === 'android'
+      ? '10.0.2.2'
+      : manifest?.debuggerHost?.split(':')[0] || 'localhost';
   const baseUrl = `http://${host}:3000`;
 
   const fetchData = useCallback(async () => {
@@ -42,20 +29,32 @@ export function useAparList() {
       setRawData([]);
       return;
     }
+
     try {
-      const res = await fetch(`${baseUrl}/api/peralatan?badge=${badgeNumber}`);
+      // pakai safeFetchOffline untuk GET (agar konsisten, walau kita queue hanya untuk mutasi)
+      const res = await safeFetchOffline(
+        `${baseUrl}/api/peralatan?badge=${badgeNumber}`,
+        { method: 'GET' }
+      );
+
+      // jika fake offline response
+      const json = await res.json();
+      if (json.offline) {
+        throw new Error('Offline');
+      }
+
       if (res.status === 400 || res.status === 404) {
-        const err = await res.json();
-        Alert.alert(`Error ${res.status}`, err.message || 'Kesalahan');
+        Alert.alert(`Error ${res.status}`, json.message || 'Kesalahan');
         clearBadgeNumber();
         setRawData([]);
         return;
       }
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const data = await res.json() as any[];
+      if (!res.ok) {
+        throw new Error(`HTTP ${res.status}`);
+      }
 
-      // === mapping yang benar ===
-      const mapped: AparRaw[] = data.map((d, idx) => ({
+      const data = json as any[];
+      const mapped: AparRaw[] = data.map(d => ({
         id_apar: String(d.id_apar),
         no_apar: d.no_apar,
         lokasi_apar: d.lokasi_apar,
@@ -65,13 +64,14 @@ export function useAparList() {
         nextDueDate: d.next_due_date ?? '',
         last_inspection: d.last_inspection ?? undefined,
         tanggal_selesai: d.last_inspection ?? undefined,
-        // <-- baru:
-        badge_petugas: d.badge_petugas ?? '',      
+        badge_petugas: d.badge_petugas ?? '',
       }));
 
       setRawData(mapped);
       await AsyncStorage.setItem('APAR_CACHE', JSON.stringify(mapped));
+
     } catch (e: any) {
+      // kalau offline atau fetch error → fallback ke cache
       const cached = await AsyncStorage.getItem('APAR_CACHE');
       if (cached) {
         setRawData(JSON.parse(cached));
@@ -89,13 +89,13 @@ export function useAparList() {
 
   const list: APAR[] = useMemo(() => {
     const today = new Date();
-    today.setHours(0,0,0,0);
-    return rawData.map((item) => {
+    today.setHours(0, 0, 0, 0);
+    return rawData.map(item => {
       let days = 0;
       if (item.nextDueDate) {
         const nd = new Date(item.nextDueDate);
-        nd.setHours(0,0,0,0);
-        days = Math.ceil((nd.getTime() - today.getTime()) / (1000*60*60*24));
+        nd.setHours(0, 0, 0, 0);
+        days = Math.ceil((nd.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
       }
       return { ...item, daysRemaining: days };
     });

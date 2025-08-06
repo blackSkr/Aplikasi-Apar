@@ -1,3 +1,4 @@
+// components/IndexPages/Header.tsx
 import Colors from '@/constants/Colors';
 import { useBadge } from '@/context/BadgeContext';
 import { Ionicons } from '@expo/vector-icons';
@@ -222,7 +223,7 @@ const Header: FC<HeaderProps> = ({ onLogout, selectedJenis }) => {
         />
         <TimeText>{timeStr}</TimeText>
         <Ionicons
-          name={isConnected ? 'wifi' : 'wifi-off'}
+          name={isConnected ? 'wifi' : 'cloud-offline-outline'}
           size={14}
           color="rgba(255,255,255,0.8)"
           style={{ marginLeft: 12 }}

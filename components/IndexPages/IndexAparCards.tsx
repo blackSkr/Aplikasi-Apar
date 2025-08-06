@@ -1,8 +1,9 @@
-// components/IndexPages/IndexAparCards.tsx
+// components/IndexPages/IndexAparCards.tsx - FIXED TEXT RENDERING
 import { IconSymbol } from '@/components/ui/IconSymbol';
 import Colors from '@/constants/Colors';
 import type { APAR } from '@/hooks/useAparList';
 import React, { useMemo } from 'react';
+import { Text } from 'react-native';
 import * as Progress from 'react-native-progress';
 import styled from 'styled-components/native';
 
@@ -88,7 +89,6 @@ export default function IndexAparCard({
       ? Math.min(1, (item.interval_maintenance - item.daysRemaining) / item.interval_maintenance)
       : 0;
 
-  // Tanggal selesai & berikutnya untuk Sudah Maintenance
   let tanggalSelesai = '-';
   let tanggalBerikut = '-';
   if (item.statusMaintenance === 'Sudah') {
@@ -123,17 +123,20 @@ export default function IndexAparCard({
   // CARD SIMPLE: SUDAH MAINTENANCE
   if (item.statusMaintenance === 'Sudah') {
     return (
-      <SimplePressable onPress={onPressDetails} android_ripple={{ color: '#eee' }}>
+      <SimplePressable 
+        onPress={onPressDetails} 
+        android_ripple={{ color: '#eee' }}
+      >
         <SimpleWrapper>
           <SuccessBar />
           <SimpleContent>
             <RowTop>
-              <SimpleNo>{item.no_apar}</SimpleNo>
+              <SimpleNo>{item.no_apar || 'N/A'}</SimpleNo>
               <IconSymbol name="checkmark-circle" size={18} color={Colors.success} />
             </RowTop>
             <SimpleLocRow>
               <IconSymbol name="location" size={12} color={Colors.subtext} />
-              <SimpleLocText>{item.lokasi_apar}</SimpleLocText>
+              <SimpleLocText>{item.lokasi_apar || 'Lokasi tidak diketahui'}</SimpleLocText>
             </SimpleLocRow>
             <DatesRow>
               <DateBlock>
@@ -157,23 +160,30 @@ export default function IndexAparCard({
 
   // CARD DETAIL: BELUM MAINTENANCE
   return (
-    <CardPressable onPress={onPressDetails} android_ripple={{ color: '#eee' }}>
+    <CardPressable 
+      onPress={onPressDetails} 
+      android_ripple={{ color: '#eee' }}
+    >
       <CardWrapper>
         <StatusBar color={status.color} />
         <CardContent>
           <TopRow>
-            <AparNo>{item.no_apar}</AparNo>
+            <AparNo>{item.no_apar || 'N/A'}</AparNo>
             <BadgeContainer color={status.color}>
               <IconSymbol name={status.icon} size={15} color={status.color} />
-              <BadgeText color={status.color}>{item.statusMaintenance}</BadgeText>
+              <BadgeText color={status.color}>{item.statusMaintenance || 'Belum'}</BadgeText>
             </BadgeContainer>
           </TopRow>
           <LocationRow>
             <IconSymbol name="location" size={13} color={Colors.subtext} />
-            <LocationText>{item.lokasi_apar}</LocationText>
+            <LocationText>{item.lokasi_apar || 'Lokasi tidak diketahui'}</LocationText>
           </LocationRow>
-          <StatusText color={status.color}>{status.text}</StatusText>
-          <SubStatusText>{status.subtext}</SubStatusText>
+          <StatusText color={status.color}>
+            {status.text}
+          </StatusText>
+          <SubStatusText>
+            {status.subtext}
+          </SubStatusText>
           <ProgressWrap>
             <Progress.Bar
               progress={progress}
@@ -233,7 +243,7 @@ const TopRow = styled.View`
   justify-content: space-between;
   align-items: center;
 `;
-const AparNo = styled.Text`
+const AparNo = styled(Text)`
   font-size: 20px;
   font-weight: bold;
   color: ${Colors.text};
@@ -245,7 +255,7 @@ const BadgeContainer = styled.View<{ color: string }>`
   padding: 5px 14px;
   border-radius: 20px;
 `;
-const BadgeText = styled.Text<{ color: string }>`
+const BadgeText = styled(Text)<{ color: string }>`
   margin-left: 4px;
   font-size: 12px;
   font-weight: 700;
@@ -256,20 +266,20 @@ const LocationRow = styled.View`
   align-items: center;
   margin: 7px 0 8px 0;
 `;
-const LocationText = styled.Text`
+const LocationText = styled(Text)`
   margin-left: 6px;
   font-size: 14px;
   color: ${Colors.subtext};
   opacity: 0.84;
 `;
-const StatusText = styled.Text<{ color: string }>`
+const StatusText = styled(Text)<{ color: string }>`
   font-size: 16px;
   font-weight: 700;
   color: ${({ color }) => color};
   margin-top: 3px;
   margin-bottom: 1px;
 `;
-const SubStatusText = styled.Text`
+const SubStatusText = styled(Text)`
   font-size: 13px;
   color: ${Colors.subtext};
   opacity: 0.75;
@@ -278,7 +288,7 @@ const SubStatusText = styled.Text`
 const ProgressWrap = styled.View`
   margin-bottom: 10px;
 `;
-const ProgressLabel = styled.Text`
+const ProgressLabel = styled(Text)`
   font-size: 11px;
   color: ${Colors.subtext};
   margin-top: 5px;
@@ -292,7 +302,7 @@ const DateRow = styled.View`
 const DateCol = styled.View`
   flex: 1;
 `;
-const DateLabelRow = styled.Text`
+const DateLabelRow = styled(Text)`
   font-size: 11px;
   color: ${Colors.subtext};
   text-transform: uppercase;
@@ -300,7 +310,7 @@ const DateLabelRow = styled.Text`
   letter-spacing: 0.6px;
   margin-bottom: 2px;
 `;
-const DateValue = styled.Text`
+const DateValue = styled(Text)`
   font-size: 13px;
   color: ${Colors.text};
   font-weight: 500;
@@ -342,7 +352,7 @@ const RowTop = styled.View`
   align-items: center;
   justify-content: space-between;
 `;
-const SimpleNo = styled.Text`
+const SimpleNo = styled(Text)`
   font-size: 17px;
   font-weight: bold;
   color: #227242;
@@ -352,7 +362,7 @@ const SimpleLocRow = styled.View`
   align-items: center;
   margin: 6px 0 3px 0;
 `;
-const SimpleLocText = styled.Text`
+const SimpleLocText = styled(Text)`
   margin-left: 5px;
   font-size: 13px;
   color: #387c5b;
@@ -369,7 +379,7 @@ const DateBlock = styled.View`
   flex: 1;
   align-items: flex-start;
 `;
-const DateLabel = styled.Text`
+const DateLabel = styled(Text)`
   font-size: 11px;
   color: #2e7d32;
   text-transform: uppercase;
@@ -377,7 +387,7 @@ const DateLabel = styled.Text`
   letter-spacing: 0.5px;
   margin-bottom: 2px;
 `;
-const DateValueSimple = styled.Text`
+const DateValueSimple = styled(Text)`
   font-size: 12px;
   color: #388e3c;
   font-weight: 700;
@@ -387,13 +397,13 @@ const PetugasRow = styled.View`
   align-items: center;
   margin-top: 2px;
 `;
-const PetugasLabel = styled.Text`
+const PetugasLabel = styled(Text)`
   font-size: 12px;
   color: #2e7d32;
   font-weight: 600;
   margin-right: 4px;
 `;
-const PetugasText = styled.Text`
+const PetugasText = styled(Text)`
   font-size: 12px;
   color: #14614f;
   font-weight: 600;

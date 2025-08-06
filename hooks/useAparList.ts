@@ -1,24 +1,25 @@
-// hooks/useAparList.ts
+// hooks/useAparList.ts - FIXED VERSION
 import { useBadge } from '@/context/BadgeContext';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import Constants from 'expo-constants';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Alert, Platform } from 'react-native';
 
-
 export type MaintenanceStatus = 'Belum' | 'Sudah';
 
-export interface APAR {
+export interface AparRaw {
   id_apar: string;
   no_apar: string;
   lokasi_apar: string;
   jenis_apar: string;
   statusMaintenance: 'Belum' | 'Sudah';
   interval_maintenance: number;
-  nextDueDate: string;    // tanggal last + interval
-  daysRemaining: number;
+  nextDueDate: string;
+  last_petugas_badge?: string;
+  badge_petugas?: string;
+  badgeNumber?: string;
+  tanggal_selesai?: string;
 }
-
 
 export interface APAR extends AparRaw {
   daysRemaining: number;
@@ -34,8 +35,6 @@ export function useAparList() {
     ? '10.0.2.2'
     : manifest?.debuggerHost?.split(':')[0] || 'localhost';
   const baseUrl = `http://${host}:3000`;
-  // const baseUrl = 'http://172.16.34.189:3000'; // <-- Ganti dengan IP sesuai ipconfig
-
 
   const fetchData = useCallback(async () => {
     if (!badgeNumber) {
@@ -72,18 +71,23 @@ export function useAparList() {
   }, [fetchData]);
 
   const list: APAR[] = useMemo(() => {
-    const today = new Date(); today.setHours(0,0,0,0);
-    return rawData.map(i => {
+    const today = new Date(); 
+    today.setHours(0,0,0,0);
+    return rawData.map((item, index) => {
       let days = 0;
-      if (i.nextDueDate) {
-        const nd = new Date(i.nextDueDate);
+      if (item.nextDueDate) {
+        const nd = new Date(item.nextDueDate);
         nd.setHours(0,0,0,0);
         days = Math.ceil((nd.getTime() - today.getTime()) / (1000*60*60*24));
       } else {
-        // Belum pernah dicek → due sekarang (0 hari)
         days = 0;
       }
-      return { ...i, daysRemaining: days };
+      return { 
+        ...item, 
+        daysRemaining: days,
+        // Ensure unique id
+        id_apar: item.id_apar || `apar_${index}_${Date.now()}`
+      };
     });
   }, [rawData]);
 

@@ -1,7 +1,6 @@
-// hooks/useAparList.ts - FIXED VERSION
+// hooks/useAparList.ts
 import { useBadge } from '@/context/BadgeContext';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import NetInfo from '@react-native-community/netinfo';
 import Constants from 'expo-constants';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Alert, Platform } from 'react-native';
@@ -13,13 +12,14 @@ export interface AparRaw {
   no_apar: string;
   lokasi_apar: string;
   jenis_apar: string;
-  statusMaintenance: 'Belum' | 'Sudah';
-  interval_maintenance: number;
-  nextDueDate: string;
-  last_petugas_badge?: string;
-  badge_petugas?: string;
-  badgeNumber?: string;
-  tanggal_selesai?: string;
+  statusMaintenance: MaintenanceStatus;
+  interval_maintenance: number;      // hari
+  nextDueDate: string;               // ISO string atau ''
+  last_inspection?: string;          // ISO string atau undefined
+  tanggal_selesai?: string;          // ISO string atau undefined
+  // petugas nggak tersedia di basic route
+    badge_petugas?: string;    // ← baru
+
 }
 
 export interface APAR extends AparRaw {
@@ -36,7 +36,6 @@ export function useAparList() {
     ? '10.0.2.2'
     : manifest?.debuggerHost?.split(':')[0] || 'localhost';
   const baseUrl = `http://${host}:3000`;
-  // const baseUrl = 'http://172.16.34.189:3000'; // ← Ganti dengan IP server saat release
 
   const fetchData = useCallback(async () => {
     if (!badgeNumber) {
@@ -53,26 +52,25 @@ export function useAparList() {
         return;
       }
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const data: AparRaw[] = await res.json();
-      setRawData(data);
-      await AsyncStorage.setItem('APAR_CACHE', JSON.stringify(data));
+      const data = await res.json() as any[];
 
-      // Tambahan: Cache semua data checklist detail
-      const net = await NetInfo.fetch();
-      if (net.isConnected) {
-        for (const apar of data) {
-          try {
-            const url = `${baseUrl}/api/peralatan/with-checklist?id=${apar.id_apar}&badge=${badgeNumber}`;
-            const resDetail = await fetch(url);
-            if (!resDetail.ok) continue;
-            const detail = await resDetail.json();
-            await AsyncStorage.setItem(`APAR_DETAIL_${apar.id_apar}`, JSON.stringify(detail));
-            console.log(`✅ Cached detail: ${apar.id_apar}`);
-          } catch (err) {
-            console.log(`❌ Gagal fetch detail ${apar.id_apar}`, err);
-          }
-        }
-      }
+      // === mapping yang benar ===
+      const mapped: AparRaw[] = data.map((d, idx) => ({
+        id_apar: String(d.id_apar),
+        no_apar: d.no_apar,
+        lokasi_apar: d.lokasi_apar,
+        jenis_apar: d.jenis_apar,
+        statusMaintenance: d.last_inspection ? 'Sudah' : 'Belum',
+        interval_maintenance: (d.kuota_per_bulan ?? 1) * 30,
+        nextDueDate: d.next_due_date ?? '',
+        last_inspection: d.last_inspection ?? undefined,
+        tanggal_selesai: d.last_inspection ?? undefined,
+        // <-- baru:
+        badge_petugas: d.badge_petugas ?? '',      
+      }));
+
+      setRawData(mapped);
+      await AsyncStorage.setItem('APAR_CACHE', JSON.stringify(mapped));
     } catch (e: any) {
       const cached = await AsyncStorage.getItem('APAR_CACHE');
       if (cached) {
@@ -91,21 +89,15 @@ export function useAparList() {
 
   const list: APAR[] = useMemo(() => {
     const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    return rawData.map((item, index) => {
+    today.setHours(0,0,0,0);
+    return rawData.map((item) => {
       let days = 0;
       if (item.nextDueDate) {
         const nd = new Date(item.nextDueDate);
-        nd.setHours(0, 0, 0, 0);
-        days = Math.ceil((nd.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
-      } else {
-        days = 0;
+        nd.setHours(0,0,0,0);
+        days = Math.ceil((nd.getTime() - today.getTime()) / (1000*60*60*24));
       }
-      return {
-        ...item,
-        daysRemaining: days,
-        id_apar: item.id_apar || `apar_${index}_${Date.now()}`
-      };
+      return { ...item, daysRemaining: days };
     });
   }, [rawData]);
 

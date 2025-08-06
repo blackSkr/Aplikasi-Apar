@@ -435,7 +435,7 @@ export default function InformasiAlat() {
         </StatsContainer>
 
         {/* Quick Actions */}
-        <ActionsContainer>
+        {/* <ActionsContainer>
           <SectionTitle>Aksi Cepat</SectionTitle>
           <ActionsGrid>
             {actions.map((action, index) => (
@@ -452,7 +452,7 @@ export default function InformasiAlat() {
               </ActionCard>
             ))}
           </ActionsGrid>
-        </ActionsContainer>
+        </ActionsContainer> */}
 
         {/* Bottom spacing */}
         <View style={{ height: 20 }} />

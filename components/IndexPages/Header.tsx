@@ -1,4 +1,3 @@
-// src/components/Header.tsx
 import Colors from '@/constants/Colors';
 import { useBadge } from '@/context/BadgeContext';
 import { Ionicons } from '@expo/vector-icons';
@@ -6,8 +5,16 @@ import { useNetInfo } from '@react-native-community/netinfo';
 import Constants from 'expo-constants';
 import { LinearGradient } from 'expo-linear-gradient';
 import React, { FC, useEffect, useState } from 'react';
-import { GestureResponderEvent } from 'react-native';
+import { GestureResponderEvent, Platform } from 'react-native';
 import styled from 'styled-components/native';
+
+// BASE URL (sama dengan useAparList)
+const manifest = Constants.manifest || (Constants as any).expoConfig;
+const host = Platform.OS === 'android'
+  ? '10.0.2.2'
+  : manifest?.debuggerHost?.split(':')[0] || 'localhost';
+const baseUrl = `http://${host}:3000`;
+// const baseUrl = 'http://172.16.34.189:3000'; // <-- Ganti dengan IP sesuai ipconfig
 
 const HeaderContainer = styled(LinearGradient).attrs({
   colors: [Colors.primaryheader, Colors.primaryLight],
@@ -72,6 +79,20 @@ const SubtitleText = styled.Text`
   margin-top: 2px;
 `;
 
+const LokasiText = styled.View`
+  flex-direction: row;
+  align-items: center;
+  margin-top: 2px;
+`;
+
+const LokasiLabel = styled.Text`
+  color: #fff;
+  font-size: 13px;
+  margin-left: 4px;
+  opacity: 0.85;
+  max-width: 170px;
+`;
+
 const LogoutButton = styled.TouchableOpacity`
   padding: 8px;
   background-color: rgba(255,255,255,0.3);
@@ -98,9 +119,35 @@ type HeaderProps = {
 
 const Header: FC<HeaderProps> = ({ onLogout, selectedJenis }) => {
   const [now, setNow] = useState(new Date());
+  const [lokasi, setLokasi] = useState<string>('');
+  const [loadingLokasi, setLoadingLokasi] = useState(false);
   const netInfo = useNetInfo();
   const isConnected = netInfo.isConnected;
   const { badgeNumber } = useBadge();
+
+  // Fetch lokasi setiap badgeNumber berubah
+  useEffect(() => {
+    let ignore = false;
+    const fetchLokasi = async () => {
+      if (!badgeNumber) {
+        setLokasi('');
+        return;
+      }
+      setLoadingLokasi(true);
+      try {
+        const res = await fetch(`${baseUrl}/api/petugas/lokasi/${badgeNumber}`);
+        if (!res.ok) throw new Error('not found');
+        const data = await res.json();
+        if (!ignore) setLokasi(data.lokasi || '');
+      } catch {
+        if (!ignore) setLokasi('');
+      } finally {
+        if (!ignore) setLoadingLokasi(false);
+      }
+    };
+    fetchLokasi();
+    return () => { ignore = true; };
+  }, [badgeNumber]);
 
   useEffect(() => {
     const timer = setInterval(() => setNow(new Date()), 1000);
@@ -145,9 +192,20 @@ const Header: FC<HeaderProps> = ({ onLogout, selectedJenis }) => {
               Manajemen {selectedJenis ? `- ${selectedJenis}` : ''}
             </TitleText>
             <SubtitleText>{subtitle}</SubtitleText>
+
+            {/* === Lokasi di bawah greetings === */}
+            <LokasiText>
+              <Ionicons name="location-outline" size={12} color="#fff" />
+              <LokasiLabel numberOfLines={1}>
+                {loadingLokasi
+                  ? 'Memuat lokasi...'
+                  : lokasi
+                  ? lokasi
+                  : 'Lokasi tidak ditemukan'}
+              </LokasiLabel>
+            </LokasiText>
           </TitleGroup>
         </LogoTitle>
-
         <LogoutButton onPress={onLogout} accessibilityLabel="Logout">
           <Ionicons name="log-out-outline" size={24} color="#fff" />
         </LogoutButton>
@@ -156,7 +214,6 @@ const Header: FC<HeaderProps> = ({ onLogout, selectedJenis }) => {
       <TimeRow>
         <Ionicons name="calendar-outline" size={14} color="rgba(255,255,255,0.8)" />
         <TimeText>{dateStr}</TimeText>
-
         <Ionicons
           name="time-outline"
           size={14}
@@ -164,7 +221,6 @@ const Header: FC<HeaderProps> = ({ onLogout, selectedJenis }) => {
           style={{ marginLeft: 16 }}
         />
         <TimeText>{timeStr}</TimeText>
-
         <Ionicons
           name={isConnected ? 'wifi' : 'wifi-off'}
           size={14}

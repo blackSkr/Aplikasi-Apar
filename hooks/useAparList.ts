@@ -34,8 +34,8 @@ export function useAparList() {
   const host = Platform.OS === 'android'
     ? '10.0.2.2'
     : manifest?.debuggerHost?.split(':')[0] || 'localhost';
-  // const baseUrl = `http://${host}:3000`;
-  const baseUrl = 'http://172.16.34.189:3000'; // <-- Ganti dengan IP sesuai ipconfig
+  const baseUrl = `http://${host}:3000`;
+  // const baseUrl = 'http://172.16.34.189:3000'; // <-- Ganti dengan IP sesuai ipconfig
 
   const fetchData = useCallback(async () => {
     if (!badgeNumber) {

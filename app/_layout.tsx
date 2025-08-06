@@ -21,24 +21,19 @@ export default function RootLayout() {
     <BadgeProvider>
       <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
         <Stack>
-          {/** 1) Bottom Tabs Group **/}
+          {/* 1) Tabs utama */}
           <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
 
-          {/** 2) Dynamic route untuk detail APAR **/}
-          <Stack.Screen
-            name="checklist/[id]"
-            options={{ title: 'Detail APAR' }}
-          />
+          {/* 2) Jangan definisikan rute yang belum ada file-nya */}
+          {/* Pastikan file checklist/[id].tsx benar-benar ada */}
+          {/* Jika belum ada, buat: app/checklist/[id].tsx */}
+          {/* <Stack.Screen name="checklist/[id]" options={{ title: 'Detail APAR' }} /> */}
 
-          {/** 3) Jika ada screen‐lain di luar tabs, daftarkan juga di sini */}
-          {/*
-          <Stack.Screen
-            name="petugas_pages/DaftarDataPetugas"
-            options={{ title: 'Daftar Petugas' }}
-          />
-          */}
+          {/* 3) Jika tidak butuh custom options, tidak perlu deklarasi manual */}
+          {/* Jadi bisa hapus baris di bawah jika hanya duplicate */}
+          {/* <Stack.Screen name="petugas_pages/DaftarDataPetugas" options={{ title: 'Daftar Petugas' }} /> */}
 
-          {/** 404 fallback **/}
+          {/* 4) Fallback untuk halaman tidak ditemukan */}
           <Stack.Screen name="+not-found" options={{ title: 'Not Found' }} />
         </Stack>
         <StatusBar style="auto" />

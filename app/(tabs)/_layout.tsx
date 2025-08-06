@@ -67,20 +67,6 @@ export default function TabsLayout() {
           ),
         }}
       />
-
-      <Tabs.Screen
-        name="DaftarDataPetugas"
-        options={{
-          title: 'Daftar Petugas',
-          tabBarIcon: ({ focused }) => (
-            <IconSymbol
-              name="list.bullet"
-              size={28}
-              color={focused ? '#D50000' : '#757575'}
-            />
-          ),
-        }}
-      />
     </Tabs>
   );
 }

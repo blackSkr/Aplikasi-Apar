@@ -1,5 +1,7 @@
 //app/ManajemenApar/AparMaintenance.tsx
 
+import { enqueueRequest } from '@/utils/ManajemenOffline'; // pastikan diimport
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import Constants from 'expo-constants';
 import * as ImagePicker from 'expo-image-picker';
@@ -36,6 +38,7 @@ const host = Platform.OS === 'android'
   ? '10.0.2.2'
   : manifest?.debuggerHost?.split(':')[0] || 'localhost';
 const BASE_URL = `http://${host}:3000`;
+// const baseUrl = 'http://172.16.34.189:3000'; // ip server
 
 export default function AparMaintenance() {
   const navigation = useNavigation();
@@ -63,16 +66,22 @@ export default function AparMaintenance() {
       try {
         const fetchUrl = `${BASE_URL}/api/peralatan/with-checklist?id=${encodeURIComponent(aparId)}&badge=${encodeURIComponent(badgeNumber || '')}`;
         const res = await fetch(fetchUrl);
+
         if (!res.ok) {
           const text = await res.text();
           throw new Error(`HTTP ${res.status}: ${text}`);
         }
+
         const aparData = await res.json();
         if (!aparData) {
           Alert.alert('Error', 'Data peralatan tidak ditemukan');
           return;
         }
+
         setData(aparData);
+
+        // Simpan cache agar bisa dipakai saat offline
+        await AsyncStorage.setItem(`APAR_DETAIL_${aparId}`, JSON.stringify(aparData));
 
         // Parse checklist
         let arr: any[] = [];
@@ -82,38 +91,78 @@ export default function AparMaintenance() {
         } else if (Array.isArray(raw)) {
           arr = raw;
         }
+
         setChecklistStates(
           arr.map((o) => {
-            const question =
-              typeof o.question === 'string'
+            const question = typeof o.question === 'string'
+              ? o.question
+              : typeof o.Pertanyaan === 'string'
+              ? o.Pertanyaan
+              : '';
+            const checklistId = typeof o.checklistId === 'number'
+              ? o.checklistId
+              : typeof o.Id === 'number'
+              ? o.Id
+              : undefined;
+            return { checklistId, item: question, condition: null, alasan: '' };
+          })
+        );
+
+        // Interval label
+        if (aparData.namaIntervalPetugas && aparData.bulanIntervalPetugas) {
+          setIntervalLabel(`${aparData.namaIntervalPetugas} (${aparData.bulanIntervalPetugas} bulan)`);
+        } else {
+          setIntervalLabel(`Default (${aparData.defaultIntervalBulan ?? '-'} bulan)`);
+        }
+
+      } catch (err: any) {
+        // fallback ke cache offline
+        const cached = await AsyncStorage.getItem(`APAR_DETAIL_${aparId}`);
+        if (cached) {
+          const aparData = JSON.parse(cached);
+          setData(aparData);
+
+          Alert.alert('Offline Mode', 'Menampilkan data dari cache.');
+
+          let arr: any[] = [];
+          const raw = aparData.keperluan_check;
+          if (typeof raw === 'string') {
+            try { arr = JSON.parse(raw); } catch { arr = []; }
+          } else if (Array.isArray(raw)) {
+            arr = raw;
+          }
+
+          setChecklistStates(
+            arr.map((o) => {
+              const question = typeof o.question === 'string'
                 ? o.question
                 : typeof o.Pertanyaan === 'string'
                 ? o.Pertanyaan
                 : '';
-            const checklistId =
-              typeof o.checklistId === 'number'
+              const checklistId = typeof o.checklistId === 'number'
                 ? o.checklistId
                 : typeof o.Id === 'number'
                 ? o.Id
                 : undefined;
-            return { checklistId, item: question, condition: null, alasan: '' };
-          })
-        );
-        // Interval label
-        if (aparData.namaIntervalPetugas && aparData.bulanIntervalPetugas) {
-          setIntervalLabel(
-            `${aparData.namaIntervalPetugas} (${aparData.bulanIntervalPetugas} bulan)`
+              return { checklistId, item: question, condition: null, alasan: '' };
+            })
           );
+
+          if (aparData.namaIntervalPetugas && aparData.bulanIntervalPetugas) {
+            setIntervalLabel(`${aparData.namaIntervalPetugas} (${aparData.bulanIntervalPetugas} bulan)`);
+          } else {
+            setIntervalLabel(`Default (${aparData.defaultIntervalBulan ?? '-'} bulan)`);
+          }
+
         } else {
-          setIntervalLabel(`Default (${aparData.defaultIntervalBulan ?? '-'} bulan)`);
+          Alert.alert('Error', 'Gagal mengambil data dan tidak ada cache: ' + err.message);
         }
-      } catch (err: any) {
-        Alert.alert('Error', 'Gagal mengambil data: ' + err.message);
       } finally {
         setLoading(false);
       }
     })();
   }, [badgeNumber, aparId]);
+
 
   const updateChecklist = (index: number, changes: Partial<ChecklistItemState>) => {
     setChecklistStates((states) =>
@@ -156,16 +205,13 @@ export default function AparMaintenance() {
       formData.append('tindakLanjut', tindakLanjut);
       formData.append('tekanan', tekanan);
       formData.append('jumlahMasalah', jumlahMasalah);
-      formData.append(
-        'checklist',
-        JSON.stringify(
-          checklistStates.map((c) => ({
-            checklistId: c.checklistId,
-            condition: c.condition,
-            alasan: c.alasan || ''
-          }))
-        )
-      );
+      formData.append('checklist', JSON.stringify(
+        checklistStates.map((c) => ({
+          checklistId: c.checklistId,
+          condition: c.condition,
+          alasan: c.alasan || ''
+        }))
+      ));
       fotoPemeriksaan.forEach((uri, idx) => {
         let fileType = uri.split('.').pop();
         let name = `photo${idx}.${fileType || 'jpg'}`;
@@ -185,16 +231,54 @@ export default function AparMaintenance() {
       if (!res.ok || !result.success) {
         throw new Error(result.message || 'Server error');
       }
+
       Alert.alert(
         'Berhasil',
         'Maintenance berhasil disimpan!',
         [{ text: 'OK', onPress: () => navigation.goBack() }]
       );
+
     } catch (err: any) {
-      Alert.alert('Error', 'Gagal menyimpan data: ' + err.message);
-    } finally {
-      setSubmitting(false);
+      const offline = err.message?.includes('Network request failed');
+      if (offline) {
+        await enqueueRequest({
+          method: 'POST',
+          url: `${BASE_URL}/api/perawatan/submit`,
+          body: {
+            aparId: String(data.id_apar),
+            tanggal: new Date().toISOString(),
+            badgeNumber,
+            intervalPetugasId: data.intervalPetugasId,
+            kondisi,
+            catatanMasalah,
+            rekomendasi,
+            tindakLanjut,
+            tekanan,
+            jumlahMasalah,
+            checklist: checklistStates.map((c) => ({
+              checklistId: c.checklistId,
+              condition: c.condition,
+              alasan: c.alasan || ''
+            })),
+            fotos: fotoPemeriksaan.map((uri, idx) => {
+              let fileType = uri.split('.').pop();
+              return {
+                uri,
+                name: `photo${idx}.${fileType || 'jpg'}`,
+                type: `image/${fileType || 'jpeg'}`
+              };
+            })
+          },
+          isMultipart: true
+        });
+
+        Alert.alert('📴 Offline', 'Data disimpan lokal & akan dikirim saat online');
+        navigation.goBack();
+      } else {
+        Alert.alert('Error', 'Gagal menyimpan data: ' + err.message);
+      }
     }
+
   };
 
   if (loading) {

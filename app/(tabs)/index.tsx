@@ -1,13 +1,15 @@
-// app/(tabs)/index.tsx - FIXED TEXT RENDERING
+// app/(tabs)/index.tsx
 import NetInfo from '@react-native-community/netinfo';
-import React, { useEffect, useMemo, useState } from 'react';
+import { useFocusEffect } from '@react-navigation/native';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
+  Alert,
   SafeAreaView,
   SectionList,
   Text,
   TouchableOpacity,
-  View,
+  View
 } from 'react-native';
 import styled from 'styled-components/native';
 
@@ -18,6 +20,8 @@ import Stats from '@/components/IndexPages/IndexStats';
 import Colors from '@/constants/Colors';
 import { useBadge } from '@/context/BadgeContext';
 import { useAparList } from '@/hooks/useAparList';
+import { useOfflineQueue } from '@/hooks/useOfflineQueue';
+import { flushQueue } from '@/utils/ManajemenOffline';
 
 import { router } from 'expo-router';
 
@@ -26,8 +30,10 @@ const INITIAL_COUNT = 3;
 export default function AparInformasi() {
   const { loading, list, refresh } = useAparList();
   const { clearBadgeNumber } = useBadge();
+  const { count, refreshQueue } = useOfflineQueue();
 
   const [isConnected, setIsConnected] = useState(true);
+  const [showSendOfflineBtn, setShowSendOfflineBtn] = useState(false);
   const [selectedJenis, setSelectedJenis] = useState<string | null>(null);
   const [visibleNeed, setVisibleNeed] = useState(INITIAL_COUNT);
   const [visibleDone, setVisibleDone] = useState(INITIAL_COUNT);
@@ -50,6 +56,17 @@ export default function AparInformasi() {
   useEffect(() => {
     if (isConnected) refresh();
   }, [isConnected, refresh]);
+  useFocusEffect(
+    useCallback(() => {
+      refresh();
+    }, [refresh])
+  );
+  useEffect(() => {
+    if (isConnected && count > 0) {
+      setShowSendOfflineBtn(true);
+    }
+  }, [isConnected, count]);
+
 
   const needAll = useMemo(
     () =>
@@ -68,6 +85,15 @@ export default function AparInformasi() {
   const handleLogout = async () => {
     await clearBadgeNumber();
   };
+
+  const handleSendOffline = async () => {
+    await flushQueue();
+    await refreshQueue();
+    await refresh(); // penting: reload ulang apar list
+    setShowSendOfflineBtn(false);
+    Alert.alert('✅ Berhasil', 'Data offline berhasil dikirim.');
+  };
+
 
   if (loading) {
     return (
@@ -150,6 +176,35 @@ export default function AparInformasi() {
         </OfflineBanner>
       )}
 
+    {showSendOfflineBtn && (
+      <FloatingBtn onPress={() => {
+        Alert.alert(
+          'Kirim Data Offline',
+          `Kamu punya ${count} data tersimpan offline. Kirim sekarang?`,
+          [
+            { text: 'Batal', style: 'cancel' },
+            {
+              text: 'Kirim',
+              style: 'destructive',
+              onPress: async () => {
+                await flushQueue();
+                await refreshQueue();
+                const latestCount = await getQueueCount(); // Tambahan
+                if (latestCount === 0) {
+                  setShowSendOfflineBtn(false);
+                }
+                await refresh();
+                Alert.alert('✅ Berhasil', 'Data offline berhasil dikirim.');
+              }
+            }
+          ]
+        );
+      }}>
+        <FloatingText>🔄 Kirim ({count})</FloatingText>
+      </FloatingBtn>
+    )}
+
+
       <Stats
         jenisList={jenisList}
         selectedJenis={selectedJenis}
@@ -187,10 +242,35 @@ export default function AparInformasi() {
         contentContainerStyle={{ paddingBottom: 20 }}
         stickySectionHeadersEnabled={false}
       />
+      {showSendOfflineBtn && (
+          <FloatingBtn onPress={() => {
+            Alert.alert(
+              'Kirim Data Offline',
+              `Kamu punya ${count} data tersimpan offline. Kirim sekarang?`,
+              [
+                { text: 'Batal', style: 'cancel' },
+                {
+                  text: 'Kirim',
+                  style: 'destructive',
+                  onPress: async () => {
+                    await flushQueue();
+                    await refreshQueue();
+                    setShowSendOfflineBtn(false);
+                    Alert.alert('✅ Berhasil', 'Data offline berhasil dikirim.');
+                  }
+                }
+              ]
+            );
+          }}>
+            <FloatingText>🔄 Kirim ({count})</FloatingText>
+          </FloatingBtn>
+        )}
+
     </Container>
   );
 }
 
+// =================== STYLED COMPONENTS ===================
 const Container = styled.View`
   flex: 1;
   background: #f5f5f5;
@@ -257,4 +337,23 @@ const HideText = styled(Text)`
   color: #444;
   font-size: 14px;
   font-weight: 600;
+`;
+const FloatingBtn = styled.TouchableOpacity`
+  position: absolute;
+  bottom: 20px;
+  right: 20px;
+  background: #dc2626;
+  padding: 16px 20px;
+  border-radius: 32px;
+  elevation: 4;
+  shadow-color: #000;
+  shadow-offset: 0px 2px;
+  shadow-opacity: 0.2;
+  shadow-radius: 4px;
+`;
+
+const FloatingText = styled.Text`
+  color: #fff;
+  font-weight: bold;
+  font-size: 14px;
 `;

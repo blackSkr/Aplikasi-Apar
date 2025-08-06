@@ -1,6 +1,7 @@
 // hooks/useAparList.ts - FIXED VERSION
 import { useBadge } from '@/context/BadgeContext';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import NetInfo from '@react-native-community/netinfo';
 import Constants from 'expo-constants';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Alert, Platform } from 'react-native';
@@ -35,7 +36,7 @@ export function useAparList() {
     ? '10.0.2.2'
     : manifest?.debuggerHost?.split(':')[0] || 'localhost';
   const baseUrl = `http://${host}:3000`;
-  // const baseUrl = 'http://172.16.34.189:3000'; // <-- Ganti dengan IP sesuai ipconfig
+  // const baseUrl = 'http://172.16.34.189:3000'; // ← Ganti dengan IP server saat release
 
   const fetchData = useCallback(async () => {
     if (!badgeNumber) {
@@ -55,6 +56,23 @@ export function useAparList() {
       const data: AparRaw[] = await res.json();
       setRawData(data);
       await AsyncStorage.setItem('APAR_CACHE', JSON.stringify(data));
+
+      // Tambahan: Cache semua data checklist detail
+      const net = await NetInfo.fetch();
+      if (net.isConnected) {
+        for (const apar of data) {
+          try {
+            const url = `${baseUrl}/api/peralatan/with-checklist?id=${apar.id_apar}&badge=${badgeNumber}`;
+            const resDetail = await fetch(url);
+            if (!resDetail.ok) continue;
+            const detail = await resDetail.json();
+            await AsyncStorage.setItem(`APAR_DETAIL_${apar.id_apar}`, JSON.stringify(detail));
+            console.log(`✅ Cached detail: ${apar.id_apar}`);
+          } catch (err) {
+            console.log(`❌ Gagal fetch detail ${apar.id_apar}`, err);
+          }
+        }
+      }
     } catch (e: any) {
       const cached = await AsyncStorage.getItem('APAR_CACHE');
       if (cached) {
@@ -72,21 +90,20 @@ export function useAparList() {
   }, [fetchData]);
 
   const list: APAR[] = useMemo(() => {
-    const today = new Date(); 
-    today.setHours(0,0,0,0);
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
     return rawData.map((item, index) => {
       let days = 0;
       if (item.nextDueDate) {
         const nd = new Date(item.nextDueDate);
-        nd.setHours(0,0,0,0);
-        days = Math.ceil((nd.getTime() - today.getTime()) / (1000*60*60*24));
+        nd.setHours(0, 0, 0, 0);
+        days = Math.ceil((nd.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
       } else {
         days = 0;
       }
-      return { 
-        ...item, 
+      return {
+        ...item,
         daysRemaining: days,
-        // Ensure unique id
         id_apar: item.id_apar || `apar_${index}_${Date.now()}`
       };
     });

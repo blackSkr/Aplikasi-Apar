@@ -30,6 +30,9 @@ const MAPPING = {
   'person.fill':          'account-circle',
   'calendar':             'event',
   'exclamationmark.triangle.fill': 'warning',
+  'checkmark.seal.fill':  'verified',
+  'checkmark.circle':    'check-circle',
+    'location':            'location-on',  // ← TAMBAHKAN INI!
   // 'calendar':             'calendar',
   // Tambahan untuk QR
   'qrcode':               'qr-code',

@@ -1,3 +1,4 @@
+// hooks/useAparList.ts
 import { useBadge } from '@/context/BadgeContext';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import Constants from 'expo-constants';

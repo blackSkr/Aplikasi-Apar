@@ -1,5 +1,4 @@
-// src/components/IndexAparCard.tsx
-
+// components/IndexPages/IndexAparCards.tsx
 import { IconSymbol } from '@/components/ui/IconSymbol';
 import Colors from '@/constants/Colors';
 import type { APAR } from '@/hooks/useAparList';
@@ -7,19 +6,9 @@ import React, { useMemo } from 'react';
 import * as Progress from 'react-native-progress';
 import styled from 'styled-components/native';
 
-type Urgency = 'completed' | 'overdue' | 'due-today' | 'due-soon' | 'normal';
-
-interface StatusConfig {
-  color: string;
-  icon: 'checkmark-circle' | 'time';
-  text: string;
-  subtext: string;
-}
-
-function getStatusConfig(item: APAR): StatusConfig {
+function getStatusConfig(item: APAR) {
   const days = item.daysRemaining;
   const interval = item.interval_maintenance;
-
   if (item.statusMaintenance === 'Sudah') {
     return {
       color: Colors.success,
@@ -28,7 +17,6 @@ function getStatusConfig(item: APAR): StatusConfig {
       subtext: 'Maintenance completed',
     };
   }
-
   if (days < 0) {
     return {
       color: Colors.error,
@@ -37,7 +25,6 @@ function getStatusConfig(item: APAR): StatusConfig {
       subtext: 'Overdue maintenance',
     };
   }
-
   if (days === 0) {
     return {
       color: Colors.warning,
@@ -46,7 +33,6 @@ function getStatusConfig(item: APAR): StatusConfig {
       subtext: 'Due today',
     };
   }
-
   if (days <= Math.ceil(interval * 0.3)) {
     return {
       color: Colors.warning,
@@ -55,7 +41,6 @@ function getStatusConfig(item: APAR): StatusConfig {
       subtext: 'Due soon',
     };
   }
-
   return {
     color: Colors.primary,
     icon: 'time',
@@ -64,14 +49,12 @@ function getStatusConfig(item: APAR): StatusConfig {
   };
 }
 
-function formatDateString(dateString?: string, interval?: number): { last: string; next: string } {
+function formatDateString(dateString?: string, interval?: number) {
   if (!dateString) return { last: '-', next: '-' };
-
   const nextDate = new Date(dateString);
   const lastDate = interval
     ? new Date(nextDate.getTime() - interval * 86400000)
     : null;
-
   const fmt = (d?: Date) =>
     d
       ? d.toLocaleDateString('id-ID', {
@@ -80,7 +63,6 @@ function formatDateString(dateString?: string, interval?: number): { last: strin
           year: 'numeric',
         })
       : '-';
-
   return { last: fmt(lastDate), next: fmt(nextDate) };
 }
 
@@ -88,7 +70,10 @@ export default function IndexAparCard({
   item,
   onPressDetails,
 }: {
-  item: APAR;
+  item: APAR & {
+    badge_petugas?: string;
+    tanggal_selesai?: string;
+  };
   onPressDetails: () => void;
 }) {
   const status = useMemo(() => getStatusConfig(item), [item]);
@@ -96,7 +81,6 @@ export default function IndexAparCard({
     () => formatDateString(item.nextDueDate, item.interval_maintenance),
     [item.nextDueDate, item.interval_maintenance]
   );
-
   const progress =
     item.statusMaintenance === 'Sudah'
       ? 1
@@ -104,194 +88,313 @@ export default function IndexAparCard({
       ? Math.min(1, (item.interval_maintenance - item.daysRemaining) / item.interval_maintenance)
       : 0;
 
+  // Tanggal selesai & berikutnya untuk Sudah Maintenance
+  let tanggalSelesai = '-';
+  let tanggalBerikut = '-';
+  if (item.statusMaintenance === 'Sudah') {
+    if (item.tanggal_selesai) {
+      tanggalSelesai = new Date(item.tanggal_selesai).toLocaleDateString('id-ID', {
+        day: '2-digit',
+        month: 'short',
+        year: 'numeric',
+      });
+    } else if (item.nextDueDate) {
+      tanggalSelesai = new Date(item.nextDueDate).toLocaleDateString('id-ID', {
+        day: '2-digit',
+        month: 'short',
+        year: 'numeric',
+      });
+    }
+    if (item.nextDueDate) {
+      tanggalBerikut = new Date(item.nextDueDate).toLocaleDateString('id-ID', {
+        day: '2-digit',
+        month: 'short',
+        year: 'numeric',
+      });
+    }
+  }
+
+  const badgePetugas =
+    item.last_petugas_badge ||
+    item.badge_petugas ||
+    item.badgeNumber ||
+    '-';
+
+  // CARD SIMPLE: SUDAH MAINTENANCE
+  if (item.statusMaintenance === 'Sudah') {
+    return (
+      <SimplePressable onPress={onPressDetails} android_ripple={{ color: '#eee' }}>
+        <SimpleWrapper>
+          <SuccessBar />
+          <SimpleContent>
+            <RowTop>
+              <SimpleNo>{item.no_apar}</SimpleNo>
+              <IconSymbol name="checkmark-circle" size={18} color={Colors.success} />
+            </RowTop>
+            <SimpleLocRow>
+              <IconSymbol name="location" size={12} color={Colors.subtext} />
+              <SimpleLocText>{item.lokasi_apar}</SimpleLocText>
+            </SimpleLocRow>
+            <DatesRow>
+              <DateBlock>
+                <DateLabel>Selesai</DateLabel>
+                <DateValueSimple>{tanggalSelesai}</DateValueSimple>
+              </DateBlock>
+              <DateBlock>
+                <DateLabel>Berikutnya</DateLabel>
+                <DateValueSimple>{tanggalBerikut}</DateValueSimple>
+              </DateBlock>
+            </DatesRow>
+            <PetugasRow>
+              <PetugasLabel>Petugas:</PetugasLabel>
+              <PetugasText>{badgePetugas}</PetugasText>
+            </PetugasRow>
+          </SimpleContent>
+        </SimpleWrapper>
+      </SimplePressable>
+    );
+  }
+
+  // CARD DETAIL: BELUM MAINTENANCE
   return (
-    <Wrapper onPress={onPressDetails} android_ripple={{ color: '#f0f0f0' }}>
-      <Container>
-        <Accent color={status.color} />
-
-        <Content>
-          <Header>
-            <Left>
-              <Number>{item.no_apar}</Number>
-              <Location numberOfLines={1}>
-                <IconSymbol name="location" size={12} color={Colors.subtext} />
-                <LocationText>{item.lokasi_apar}</LocationText>
-              </Location>
-            </Left>
-
+    <CardPressable onPress={onPressDetails} android_ripple={{ color: '#eee' }}>
+      <CardWrapper>
+        <StatusBar color={status.color} />
+        <CardContent>
+          <TopRow>
+            <AparNo>{item.no_apar}</AparNo>
             <BadgeContainer color={status.color}>
-              <IconSymbol name={status.icon} size={16} color={status.color} />
+              <IconSymbol name={status.icon} size={15} color={status.color} />
               <BadgeText color={status.color}>{item.statusMaintenance}</BadgeText>
             </BadgeContainer>
-          </Header>
-
-          <MainStatus>
-            <StatusText color={status.color}>{status.text}</StatusText>
-            <Subtext>{status.subtext}</Subtext>
-          </MainStatus>
-
-          <ProgressWrapper>
+          </TopRow>
+          <LocationRow>
+            <IconSymbol name="location" size={13} color={Colors.subtext} />
+            <LocationText>{item.lokasi_apar}</LocationText>
+          </LocationRow>
+          <StatusText color={status.color}>{status.text}</StatusText>
+          <SubStatusText>{status.subtext}</SubStatusText>
+          <ProgressWrap>
             <Progress.Bar
               progress={progress}
               width={null}
-              height={4}
+              height={5}
               color={status.color}
-              unfilledColor={`${status.color}20`}
+              unfilledColor="#ededed"
               borderWidth={0}
               borderRadius={2}
             />
             <ProgressLabel>{Math.round(progress * 100)}% complete</ProgressLabel>
-          </ProgressWrapper>
-
-          <Dates>
-            <DateBlock>
-              <DateLabel>Terakhir</DateLabel>
+          </ProgressWrap>
+          <DateRow>
+            <DateCol>
+              <DateLabelRow>Terakhir</DateLabelRow>
               <DateValue>{last}</DateValue>
-            </DateBlock>
-
-            <Divider />
-
-            <DateBlock>
-              <DateLabel>Selanjutnya</DateLabel>
+            </DateCol>
+            <DateDivider />
+            <DateCol>
+              <DateLabelRow>Selanjutnya</DateLabelRow>
               <DateValue>{next}</DateValue>
-            </DateBlock>
-          </Dates>
-        </Content>
-      </Container>
-    </Wrapper>
+            </DateCol>
+          </DateRow>
+        </CardContent>
+      </CardWrapper>
+    </CardPressable>
   );
 }
 
-// ===== styled-components =====
-
-const Wrapper = styled.Pressable`
-  margin: 6px 16px;
+// ========== Styled Components ==========
+// --- Card Belum Maintenance ---
+const CardPressable = styled.Pressable`
+  margin: 10px 14px 0 14px;
 `;
-
-const Container = styled.View`
+const CardWrapper = styled.View`
   flex-direction: row;
   background: #fff;
-  border-radius: 16px;
-  border: 1px solid #f0f0f0;
-  elevation: 2;
+  border-radius: 18px;
+  border: 1.2px solid #efefef;
+  elevation: 3;
   shadow-color: #000;
-  shadow-opacity: 0.08;
+  shadow-opacity: 0.09;
   shadow-offset: 0px 2px;
-  shadow-radius: 12px;
+  shadow-radius: 10px;
   overflow: hidden;
 `;
-
-const Accent = styled.View<{ color: string }>`
-  width: 4px;
+const StatusBar = styled.View<{ color: string }>`
+  width: 5px;
   background-color: ${({ color }) => color};
 `;
-
-const Content = styled.View`
+const CardContent = styled.View`
   flex: 1;
-  padding: 20px;
+  padding: 18px 18px 14px 18px;
 `;
-
-const Header = styled.View`
+const TopRow = styled.View`
   flex-direction: row;
   justify-content: space-between;
-  margin-bottom: 16px;
-`;
-
-const Left = styled.View`
-  flex: 1;
-  margin-right: 12px;
-`;
-
-const Number = styled.Text`
-  font-size: 20px;
-  font-weight: 700;
-  color: ${Colors.text};
-  margin-bottom: 4px;
-`;
-
-const Location = styled.Text`
-  flex-direction: row;
   align-items: center;
 `;
-
-const LocationText = styled.Text`
-  margin-left: 4px;
-  font-size: 13px;
-  color: ${Colors.subtext};
-  opacity: 0.8;
+const AparNo = styled.Text`
+  font-size: 20px;
+  font-weight: bold;
+  color: ${Colors.text};
 `;
-
 const BadgeContainer = styled.View<{ color: string }>`
   flex-direction: row;
   align-items: center;
-  padding: 6px 12px;
+  background-color: ${({ color }) => `${color}19`};
+  padding: 5px 14px;
   border-radius: 20px;
-  background-color: ${({ color }) => `${color}15`};
 `;
-
 const BadgeText = styled.Text<{ color: string }>`
   margin-left: 4px;
   font-size: 12px;
-  font-weight: 600;
+  font-weight: 700;
   color: ${({ color }) => color};
 `;
-
-const MainStatus = styled.View`
-  margin-bottom: 16px;
+const LocationRow = styled.View`
+  flex-direction: row;
+  align-items: center;
+  margin: 7px 0 8px 0;
 `;
-
+const LocationText = styled.Text`
+  margin-left: 6px;
+  font-size: 14px;
+  color: ${Colors.subtext};
+  opacity: 0.84;
+`;
 const StatusText = styled.Text<{ color: string }>`
   font-size: 16px;
-  font-weight: 600;
+  font-weight: 700;
   color: ${({ color }) => color};
-  margin-bottom: 2px;
+  margin-top: 3px;
+  margin-bottom: 1px;
 `;
-
-const Subtext = styled.Text`
+const SubStatusText = styled.Text`
   font-size: 13px;
   color: ${Colors.subtext};
-  opacity: 0.7;
+  opacity: 0.75;
+  margin-bottom: 10px;
 `;
-
-const ProgressWrapper = styled.View`
-  margin-bottom: 16px;
+const ProgressWrap = styled.View`
+  margin-bottom: 10px;
 `;
-
 const ProgressLabel = styled.Text`
   font-size: 11px;
   color: ${Colors.subtext};
-  margin-top: 6px;
+  margin-top: 5px;
   text-align: right;
 `;
-
-const Dates = styled.View`
+const DateRow = styled.View`
   flex-direction: row;
   align-items: center;
+  margin-top: 7px;
 `;
-
-const DateBlock = styled.View`
+const DateCol = styled.View`
   flex: 1;
 `;
-
-const DateLabel = styled.Text`
+const DateLabelRow = styled.Text`
   font-size: 11px;
   color: ${Colors.subtext};
   text-transform: uppercase;
-  font-weight: 600;
-  letter-spacing: 0.5px;
+  font-weight: 700;
+  letter-spacing: 0.6px;
   margin-bottom: 2px;
 `;
-
 const DateValue = styled.Text`
   font-size: 13px;
   color: ${Colors.text};
   font-weight: 500;
 `;
-
-const Divider = styled.View`
+const DateDivider = styled.View`
   width: 1px;
-  height: 24px;
-  background-color: ${Colors.border};
-  margin: 0 16px;
-  opacity: 0.3;
+  height: 22px;
+  background-color: #ececec;
+  margin: 0 14px;
+  opacity: 0.32;
+`;
+
+// --- Card Simple (Sudah Maintenance) ---
+const SimplePressable = styled.Pressable`
+  margin: 10px 14px 0 14px;
+`;
+const SimpleWrapper = styled.View`
+  flex-direction: row;
+  background: #f6fff8;
+  border-radius: 14px;
+  border: 1.2px solid #cde9dc;
+  elevation: 1;
+  shadow-color: #000;
+  shadow-opacity: 0.05;
+  shadow-offset: 0px 1px;
+  shadow-radius: 4px;
+  overflow: hidden;
+`;
+const SuccessBar = styled.View`
+  width: 5px;
+  background-color: ${Colors.success};
+`;
+const SimpleContent = styled.View`
+  flex: 1;
+  padding: 14px 16px 8px 16px;
+`;
+const RowTop = styled.View`
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+`;
+const SimpleNo = styled.Text`
+  font-size: 17px;
+  font-weight: bold;
+  color: #227242;
+`;
+const SimpleLocRow = styled.View`
+  flex-direction: row;
+  align-items: center;
+  margin: 6px 0 3px 0;
+`;
+const SimpleLocText = styled.Text`
+  margin-left: 5px;
+  font-size: 13px;
+  color: #387c5b;
+  opacity: 0.88;
+`;
+const DatesRow = styled.View`
+  flex-direction: row;
+  align-items: center;
+  margin-top: 6px;
+  margin-bottom: 2px;
+  gap: 10px;
+`;
+const DateBlock = styled.View`
+  flex: 1;
+  align-items: flex-start;
+`;
+const DateLabel = styled.Text`
+  font-size: 11px;
+  color: #2e7d32;
+  text-transform: uppercase;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  margin-bottom: 2px;
+`;
+const DateValueSimple = styled.Text`
+  font-size: 12px;
+  color: #388e3c;
+  font-weight: 700;
+`;
+const PetugasRow = styled.View`
+  flex-direction: row;
+  align-items: center;
+  margin-top: 2px;
+`;
+const PetugasLabel = styled.Text`
+  font-size: 12px;
+  color: #2e7d32;
+  font-weight: 600;
+  margin-right: 4px;
+`;
+const PetugasText = styled.Text`
+  font-size: 12px;
+  color: #14614f;
+  font-weight: 600;
 `;

@@ -1,25 +1,12 @@
-import { useNavigation } from '@react-navigation/native';
+//app/ManajemenApar/AparMaintenance.tsx
+
+import { useNavigation, useRoute } from '@react-navigation/native';
+import Constants from 'expo-constants';
 import * as ImagePicker from 'expo-image-picker';
 import React, { Fragment, useEffect, useState } from 'react';
-import {
-  ActivityIndicator,
-  Alert,
-  Image,
-  KeyboardAvoidingView,
-  Platform,
-  Pressable,
-  ScrollView,
-  Text,
-  TextInput,
-  View
-} from 'react-native';
+import { ActivityIndicator, Alert, Image, KeyboardAvoidingView, Platform, Pressable, ScrollView, Text, TextInput, View } from 'react-native';
 import styled from 'styled-components/native';
 import { useBadge } from '../../context/BadgeContext';
-
-const DUMMY_ID = '8';
-const BASE_URL = Platform.OS === 'android'
-  ? 'http://10.0.2.2:3000'
-  : 'http://localhost:3000';
 
 type ChecklistItemState = {
   checklistId?: number;
@@ -44,16 +31,24 @@ type AparData = {
   keperluan_check: any;
 };
 
+const manifest = Constants.manifest || (Constants as any).expoConfig;
+const host = Platform.OS === 'android'
+  ? '10.0.2.2'
+  : manifest?.debuggerHost?.split(':')[0] || 'localhost';
+const BASE_URL = `http://${host}:3000`;
+
 export default function AparMaintenance() {
   const navigation = useNavigation();
+  const route = useRoute();
   const { badgeNumber } = useBadge();
+
+  const aparId = (route.params as any)?.id;
 
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [data, setData] = useState<AparData | null>(null);
   const [checklistStates, setChecklistStates] = useState<ChecklistItemState[]>([]);
   const [fotoPemeriksaan, setFotoPemeriksaan] = useState<string[]>([]);
-
   const [intervalLabel, setIntervalLabel] = useState('—');
   const [kondisi, setKondisi] = useState('');
   const [catatanMasalah, setCatatanMasalah] = useState('');
@@ -66,43 +61,27 @@ export default function AparMaintenance() {
     (async () => {
       setLoading(true);
       try {
-        console.log('--- DEBUG FETCH ---');
-        console.log('Badge FE:', badgeNumber);
-        console.log('URL FETCH:', `${BASE_URL}/api/peralatan/with-checklist?id=${DUMMY_ID}&badge=${encodeURIComponent(badgeNumber || '')}`);
-        const res = await fetch(
-          `${BASE_URL}/api/peralatan/with-checklist?id=${DUMMY_ID}&badge=${encodeURIComponent(badgeNumber || '')}`
-        );
+        const fetchUrl = `${BASE_URL}/api/peralatan/with-checklist?id=${encodeURIComponent(aparId)}&badge=${encodeURIComponent(badgeNumber || '')}`;
+        const res = await fetch(fetchUrl);
         if (!res.ok) {
           const text = await res.text();
-          console.log('BAD RESPONSE:', text);
-          throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+          throw new Error(`HTTP ${res.status}: ${text}`);
         }
-
         const aparData = await res.json();
-        console.log('APAR DATA:', aparData);
-
         if (!aparData) {
           Alert.alert('Error', 'Data peralatan tidak ditemukan');
           return;
         }
-
         setData(aparData);
 
         // Parse checklist
         let arr: any[] = [];
         const raw = aparData.keperluan_check;
         if (typeof raw === 'string') {
-          try {
-            arr = JSON.parse(raw);
-          } catch (e) {
-            console.log('Checklist PARSE ERROR:', e, raw);
-            arr = [];
-          }
+          try { arr = JSON.parse(raw); } catch { arr = []; }
         } else if (Array.isArray(raw)) {
           arr = raw;
         }
-        console.log('Checklist Parsed:', arr);
-
         setChecklistStates(
           arr.map((o) => {
             const question =
@@ -117,15 +96,9 @@ export default function AparMaintenance() {
                 : typeof o.Id === 'number'
                 ? o.Id
                 : undefined;
-            return {
-              checklistId,
-              item: question,
-              condition: null,
-              alasan: ''
-            };
+            return { checklistId, item: question, condition: null, alasan: '' };
           })
         );
-
         // Interval label
         if (aparData.namaIntervalPetugas && aparData.bulanIntervalPetugas) {
           setIntervalLabel(
@@ -134,20 +107,15 @@ export default function AparMaintenance() {
         } else {
           setIntervalLabel(`Default (${aparData.defaultIntervalBulan ?? '-'} bulan)`);
         }
-
-      } catch (err) {
-        console.error('❌ Error fetching data:', err);
-        Alert.alert('Error', 'Gagal mengambil data dari server: ' + (err as Error).message);
+      } catch (err: any) {
+        Alert.alert('Error', 'Gagal mengambil data: ' + err.message);
       } finally {
         setLoading(false);
       }
     })();
-  }, [badgeNumber]);
+  }, [badgeNumber, aparId]);
 
-  const updateChecklist = (
-    index: number,
-    changes: Partial<ChecklistItemState>
-  ) => {
+  const updateChecklist = (index: number, changes: Partial<ChecklistItemState>) => {
     setChecklistStates((states) =>
       states.map((s, i) => (i === index ? { ...s, ...changes } : s))
     );
@@ -161,7 +129,6 @@ export default function AparMaintenance() {
     });
     if (!result.canceled) {
       setFotoPemeriksaan((prev) => [...prev, result.assets[0].uri]);
-      console.log('Picked Images:', result.assets[0].uri);
     }
   };
 
@@ -169,33 +136,26 @@ export default function AparMaintenance() {
     if (!badgeNumber || !data) {
       return Alert.alert('Error', 'Badge atau data peralatan tidak tersedia');
     }
-
-    // Validate checklist
     for (const c of checklistStates) {
       if (!c.condition || (c.condition === 'Tidak Baik' && !c.alasan)) {
         return Alert.alert('Validasi', 'Mohon lengkapi semua checklist dan alasan jika ada kondisi tidak baik');
       }
     }
-
     setSubmitting(true);
-
     try {
       const formData = new FormData();
       formData.append('aparId', String(data.id_apar));
       formData.append('tanggal', new Date().toISOString());
       formData.append('badgeNumber', badgeNumber);
-
       if (data.intervalPetugasId !== undefined && data.intervalPetugasId !== null) {
         formData.append('intervalPetugasId', String(data.intervalPetugasId));
       }
-
       formData.append('kondisi', kondisi);
       formData.append('catatanMasalah', catatanMasalah);
       formData.append('rekomendasi', rekomendasi);
       formData.append('tindakLanjut', tindakLanjut);
       formData.append('tekanan', tekanan);
       formData.append('jumlahMasalah', jumlahMasalah);
-
       formData.append(
         'checklist',
         JSON.stringify(
@@ -206,7 +166,6 @@ export default function AparMaintenance() {
           }))
         )
       );
-
       fotoPemeriksaan.forEach((uri, idx) => {
         let fileType = uri.split('.').pop();
         let name = `photo${idx}.${fileType || 'jpg'}`;
@@ -217,38 +176,21 @@ export default function AparMaintenance() {
         } as any);
       });
 
-      // DEBUG: Print FormData (stringify)
-      for (let pair of (formData as any)._parts || []) {
-        console.log('FORMDATA PART:', pair[0], pair[1]);
-      }
-
-      console.log('--- SUBMIT TO:', `${BASE_URL}/api/perawatan/submit`);
-
       const res = await fetch(`${BASE_URL}/api/perawatan/submit`, {
         method: 'POST',
         body: formData,
-        headers: {
-          'Content-Type': 'multipart/form-data'
-        }
+        headers: { 'Content-Type': 'multipart/form-data' }
       });
-
       const result = await res.json();
-      console.log('SUBMIT RESPONSE:', result);
-
       if (!res.ok || !result.success) {
         throw new Error(result.message || 'Server error');
       }
-
       Alert.alert(
         'Berhasil',
         'Maintenance berhasil disimpan!',
-        [
-          { text: 'OK', onPress: () => navigation.goBack() }
-        ]
+        [{ text: 'OK', onPress: () => navigation.goBack() }]
       );
-
     } catch (err: any) {
-      console.error('❌ Error submit maintenance:', err);
       Alert.alert('Error', 'Gagal menyimpan data: ' + err.message);
     } finally {
       setSubmitting(false);
@@ -263,7 +205,6 @@ export default function AparMaintenance() {
       </Centered>
     );
   }
-
   if (!data) {
     return (
       <Centered>
@@ -275,10 +216,7 @@ export default function AparMaintenance() {
   }
 
   return (
-    <KeyboardAvoidingView
-      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-      style={{ flex: 1 }}
-    >
+    <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
       <ScrollContainer>
         {/* APAR Info */}
         <Card>
@@ -297,17 +235,13 @@ export default function AparMaintenance() {
           {data.last_inspection_date && (
             <>
               <Label>Inspeksi Terakhir</Label>
-              <ReadOnlyInput
-                value={new Date(data.last_inspection_date).toLocaleDateString('id-ID')}
-              />
+              <ReadOnlyInput value={new Date(data.last_inspection_date).toLocaleDateString('id-ID')} />
             </>
           )}
           {data.nextDueDate && (
             <>
               <Label>Target Inspeksi Berikutnya</Label>
-              <ReadOnlyInput
-                value={new Date(data.nextDueDate).toLocaleDateString('id-ID')}
-              />
+              <ReadOnlyInput value={new Date(data.nextDueDate).toLocaleDateString('id-ID')} />
             </>
           )}
         </Card>
@@ -315,49 +249,17 @@ export default function AparMaintenance() {
         {/* Hasil Pemeriksaan */}
         <Card>
           <Label>Kondisi Umum</Label>
-          <Input
-            placeholder="Contoh: Baik, Perlu Perhatian, Rusak"
-            value={kondisi}
-            onChangeText={setKondisi}
-          />
+          <Input placeholder="Contoh: Baik, Perlu Perhatian, Rusak" value={kondisi} onChangeText={setKondisi} />
           <Label>Catatan Masalah</Label>
-          <Input
-            placeholder="Deskripsikan masalah yang ditemukan..."
-            value={catatanMasalah}
-            onChangeText={setCatatanMasalah}
-            multiline
-            numberOfLines={3}
-          />
+          <Input placeholder="Deskripsikan masalah yang ditemukan..." value={catatanMasalah} onChangeText={setCatatanMasalah} multiline numberOfLines={3} />
           <Label>Rekomendasi</Label>
-          <Input
-            placeholder="Saran tindakan yang perlu dilakukan..."
-            value={rekomendasi}
-            onChangeText={setRekomendasi}
-            multiline
-            numberOfLines={3}
-          />
+          <Input placeholder="Saran tindakan yang perlu dilakukan..." value={rekomendasi} onChangeText={setRekomendasi} multiline numberOfLines={3} />
           <Label>Tindak Lanjut</Label>
-          <Input
-            placeholder="Rencana tindak lanjut..."
-            value={tindakLanjut}
-            onChangeText={setTindakLanjut}
-            multiline
-            numberOfLines={2}
-          />
+          <Input placeholder="Rencana tindak lanjut..." value={tindakLanjut} onChangeText={setTindakLanjut} multiline numberOfLines={2} />
           <Label>Tekanan (bar)</Label>
-          <Input
-            placeholder="Contoh: 12.5"
-            keyboardType="numeric"
-            value={tekanan}
-            onChangeText={setTekanan}
-          />
+          <Input placeholder="Contoh: 12.5" keyboardType="numeric" value={tekanan} onChangeText={setTekanan} />
           <Label>Jumlah Masalah</Label>
-          <Input
-            placeholder="Contoh: 0, 1, 2"
-            keyboardType="numeric"
-            value={jumlahMasalah}
-            onChangeText={setJumlahMasalah}
-          />
+          <Input placeholder="Contoh: 0, 1, 2" keyboardType="numeric" value={jumlahMasalah} onChangeText={setJumlahMasalah} />
         </Card>
 
         {/* Checklist */}
@@ -370,32 +272,22 @@ export default function AparMaintenance() {
                 <ButtonRow>
                   <ToggleButton
                     active={c.condition === 'Baik'}
-                    onPress={() =>
-                      updateChecklist(idx, { condition: 'Baik', alasan: '' })
-                    }
+                    onPress={() => updateChecklist(idx, { condition: 'Baik', alasan: '' })}
                   >
-                    <ToggleText active={c.condition === 'Baik'}>
-                      ✓ Baik
-                    </ToggleText>
+                    <ToggleText active={c.condition === 'Baik'}>✓ Baik</ToggleText>
                   </ToggleButton>
                   <ToggleButton
                     active={c.condition === 'Tidak Baik'}
-                    onPress={() =>
-                      updateChecklist(idx, { condition: 'Tidak Baik' })
-                    }
+                    onPress={() => updateChecklist(idx, { condition: 'Tidak Baik' })}
                   >
-                    <ToggleText active={c.condition === 'Tidak Baik'}>
-                      ✗ Tidak Baik
-                    </ToggleText>
+                    <ToggleText active={c.condition === 'Tidak Baik'}>✗ Tidak Baik</ToggleText>
                   </ToggleButton>
                 </ButtonRow>
                 {c.condition === 'Tidak Baik' && (
                   <Input
                     placeholder="Jelaskan alasan kondisi tidak baik..."
                     value={c.alasan}
-                    onChangeText={(t) =>
-                      updateChecklist(idx, { alasan: t })
-                    }
+                    onChangeText={t => updateChecklist(idx, { alasan: t })}
                     multiline
                     numberOfLines={2}
                   />
@@ -412,21 +304,10 @@ export default function AparMaintenance() {
             <Text style={{ color: '#666' }}>📷 Tambah Foto</Text>
           </Pressable>
           {fotoPemeriksaan.length > 0 && (
-            <ScrollView
-              horizontal
-              showsHorizontalScrollIndicator={false}
-              style={{ marginTop: 12 }}
-            >
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginTop: 12 }}>
               {fotoPemeriksaan.map((uri, i) => (
                 <View key={i} style={{ marginRight: 8 }}>
-                  <Image
-                    source={{ uri }}
-                    style={{
-                      width: 100,
-                      height: 100,
-                      borderRadius: 6
-                    }}
-                  />
+                  <Image source={{ uri }} style={{ width: 100, height: 100, borderRadius: 6 }} />
                   <Pressable
                     style={{
                       position: 'absolute',
@@ -439,9 +320,7 @@ export default function AparMaintenance() {
                       alignItems: 'center',
                       justifyContent: 'center'
                     }}
-                    onPress={() => {
-                      setFotoPemeriksaan(prev => prev.filter((_, idx) => idx !== i));
-                    }}
+                    onPress={() => setFotoPemeriksaan(prev => prev.filter((_, idx) => idx !== i))}
                   >
                     <Text style={{ color: 'white', fontSize: 16 }}>×</Text>
                   </Pressable>
@@ -458,26 +337,23 @@ export default function AparMaintenance() {
             <SubmitText>💾 Simpan Perawatan</SubmitText>
           )}
         </SubmitButton>
-        
         <View style={{ height: 40 }} />
       </ScrollContainer>
     </KeyboardAvoidingView>
   );
 }
 
-// --- Styled Components sama seperti kode kamu ---
+// --- Styled Components ---
 const Centered = styled(View)`
   flex: 1;
   justify-content: center;
   align-items: center;
   padding: 20px;
 `;
-
 const ScrollContainer = styled(ScrollView)`
   flex: 1;
   background-color: #f9fafb;
 `;
-
 const Card = styled(View)`
   background: #fff;
   margin: 12px 16px;
@@ -489,7 +365,6 @@ const Card = styled(View)`
   shadow-opacity: 0.1;
   shadow-radius: 2px;
 `;
-
 const Label = styled(Text)`
   font-size: 14px;
   font-weight: 600;
@@ -497,10 +372,7 @@ const Label = styled(Text)`
   margin-bottom: 8px;
   margin-top: 4px;
 `;
-
-const ReadOnlyInput = styled(TextInput).attrs({
-  editable: false
-})`
+const ReadOnlyInput = styled(TextInput).attrs({ editable: false })`
   background: #f3f4f6;
   padding: 12px;
   border-radius: 6px;
@@ -508,7 +380,6 @@ const ReadOnlyInput = styled(TextInput).attrs({
   color: #6b7280;
   font-size: 14px;
 `;
-
 const Input = styled(TextInput)`
   background: #fff;
   border: 1px solid #d1d5db;
@@ -518,7 +389,6 @@ const Input = styled(TextInput)`
   color: #111827;
   font-size: 14px;
 `;
-
 const QuestionText = styled(Text)`
   font-size: 15px;
   font-weight: 500;
@@ -526,13 +396,11 @@ const QuestionText = styled(Text)`
   margin-bottom: 8px;
   line-height: 22px;
 `;
-
 const ButtonRow = styled(View)`
   flex-direction: row;
   margin-bottom: 12px;
   gap: 8px;
 `;
-
 const ToggleButton = styled(Pressable)<{ active: boolean }>`
   flex: 1;
   background-color: ${({ active }) => (active ? '#dc2626' : '#f3f4f6')};
@@ -542,13 +410,11 @@ const ToggleButton = styled(Pressable)<{ active: boolean }>`
   border-width: 1px;
   border-color: ${({ active }) => (active ? '#dc2626' : '#d1d5db')};
 `;
-
 const ToggleText = styled(Text)<{ active: boolean }>`
   color: ${({ active }) => (active ? '#fff' : '#6b7280')};
   font-weight: 600;
   font-size: 14px;
 `;
-
 const uploadStyle = {
   backgroundColor: '#f3f4f6',
   padding: 16,
@@ -559,7 +425,6 @@ const uploadStyle = {
   borderColor: '#d1d5db',
   borderStyle: 'dashed'
 };
-
 const SubmitButton = styled(Pressable)<{ disabled?: boolean }>`
   background: ${({ disabled }) => disabled ? '#9ca3af' : '#dc2626'};
   padding: 16px;
@@ -572,7 +437,6 @@ const SubmitButton = styled(Pressable)<{ disabled?: boolean }>`
   shadow-opacity: 0.1;
   shadow-radius: 4px;
 `;
-
 const SubmitText = styled(Text)`
   color: #fff;
   font-size: 16px;

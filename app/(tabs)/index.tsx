@@ -1,3 +1,4 @@
+// app/%28tabs%29/index.tsx
 import NetInfo from '@react-native-community/netinfo';
 import React, { useEffect, useMemo, useState } from 'react';
 import {
@@ -17,6 +18,8 @@ import Stats from '@/components/IndexPages/IndexStats';
 import Colors from '@/constants/Colors';
 import { useBadge } from '@/context/BadgeContext';
 import { useAparList } from '@/hooks/useAparList';
+
+import { router } from 'expo-router'; // ← WAJIB!
 
 const INITIAL_COUNT = 3;
 
@@ -104,12 +107,10 @@ export default function AparInformasi() {
     const visible =
       section.type === 'need' ? visibleNeed : visibleDone;
 
-    // Jika tidak ada data, tidak tampilkan apapun
     if (total === 0) return null;
 
     return (
       <View style={{ alignItems: 'center', paddingVertical: 8, flexDirection: 'row', justifyContent: 'center' }}>
-        {/* Tampilkan "Tampilkan Lagi" jika masih ada data */}
         {visible < total && (
           <LoadMoreBtn
             onPress={() =>
@@ -122,8 +123,6 @@ export default function AparInformasi() {
             <LoadMoreText>Tampilkan Lagi</LoadMoreText>
           </LoadMoreBtn>
         )}
-
-        {/* Tampilkan "Tutup" jika sudah lebih dari 3 data */}
         {visible > INITIAL_COUNT && (
           <HideBtn
             onPress={() =>
@@ -169,9 +168,12 @@ export default function AparInformasi() {
         renderItem={({ item }) => (
           <IndexAparCard
             item={item}
-            onPressDetails={() => {
-              /* navigasi ke detail jika perlu */
-            }}
+            onPressDetails={() =>
+              router.push({
+                pathname: "/ManajemenApar/AparMaintenance",
+                params: { id: item.id_apar }
+              })
+            }
           />
         )}
         renderSectionFooter={({ section }) => renderFooter(section)}
@@ -210,4 +212,3 @@ const HideText = styled(Text)`
   font-size: 14px;
   font-weight: 600;
 `;
-

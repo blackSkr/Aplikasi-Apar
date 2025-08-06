@@ -1,16 +1,34 @@
-// src/pages/petugas_pages/TambahPetugas.tsx
+// src/pages/InformasiAlat.tsx
 import { IconSymbol } from '@/components/ui/IconSymbol';
+import { useBadge } from '@/context/BadgeContext';
+import { useAparList } from '@/hooks/useAparList';
 import { useRouter } from 'expo-router';
 import React, { useState } from 'react';
-import { Alert, Pressable, SafeAreaView, TextInput } from 'react-native';
+import {
+  Dimensions,
+  Pressable,
+  SafeAreaView,
+  ScrollView,
+  StatusBar,
+  View
+} from 'react-native';
 import styled from 'styled-components/native';
-import { ulid } from 'ulid';
+
+const { width } = Dimensions.get('window');
 
 const Colors = {
   primary: '#D50000',
-  background: '#FFFFFF',
+  secondary: '#FF5722',
+  success: '#4CAF50',
+  warning: '#FF9800',
+  danger: '#F44336',
+  info: '#2196F3',
+  background: '#F8F9FA',
+  cardBg: '#FFFFFF',
   text: '#212121',
-  border: '#ECECEC',
+  textSecondary: '#757575',
+  border: '#E0E0E0',
+  shadow: 'rgba(0,0,0,0.1)',
 };
 
 const Container = styled(SafeAreaView)`
@@ -19,186 +37,422 @@ const Container = styled(SafeAreaView)`
 `;
 
 const Header = styled.View`
-  padding: 60px 16px 16px;
+  padding: ${StatusBar.currentHeight || 44}px 20px 24px;
   background-color: ${Colors.primary};
+  border-bottom-left-radius: 24px;
+  border-bottom-right-radius: 24px;
+  shadow-color: ${Colors.shadow};
+  shadow-offset: 0px 4px;
+  shadow-opacity: 0.3;
+  shadow-radius: 8px;
+  elevation: 8;
+`;
+
+const HeaderContent = styled.View`
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+`;
+
+const HeaderLeft = styled.View`
+  flex: 1;
 `;
 
 const Title = styled.Text`
   color: #fff;
-  font-size: 22px;
+  font-size: 28px;
   font-weight: bold;
 `;
 
-const NavWrapper = styled.View`
-  flex-direction: row;
-  justify-content: space-between;
-  padding: 16px;
-  background-color: #fff;
+const Subtitle = styled.Text`
+  color: rgba(255,255,255,0.9);
+  font-size: 16px;
+  margin-top: 4px;
 `;
 
-const NavButton = styled(Pressable)`
+const RefreshButton = styled(Pressable)`
+  background-color: rgba(255,255,255,0.2);
+  padding: 12px;
+  border-radius: 12px;
+  border: 1px solid rgba(255,255,255,0.3);
+`;
+
+const Content = styled(ScrollView)`
+  flex: 1;
+  padding: 20px;
+`;
+
+// Petugas Info Card
+const PetugasCard = styled.View`
+  background-color: ${Colors.cardBg};
+  border-radius: 16px;
+  padding: 20px;
+  margin-bottom: 24px;
+  shadow-color: ${Colors.shadow};
+  shadow-offset: 0px 2px;
+  shadow-opacity: 0.1;
+  shadow-radius: 4px;
+  elevation: 3;
+  border-left-width: 4px;
+  border-left-color: ${Colors.info};
+`;
+
+const PetugasHeader = styled.View`
   flex-direction: row;
   align-items: center;
-  padding: 10px 12px;
-  border: 1px solid ${Colors.primary};
-  border-radius: 8px;
+  margin-bottom: 16px;
 `;
 
-const NavButtonText = styled.Text`
-  color: ${Colors.primary};
-  font-size: 14px;
-  margin-left: 8px;
-`;
-
-const Form = styled.View`
-  padding: 16px;
-`;
-
-const Label = styled.Text`
+const PetugasTitle = styled.Text`
   color: ${Colors.text};
+  font-size: 18px;
+  font-weight: bold;
+  margin-left: 12px;
+`;
+
+const PetugasRow = styled.View`
+  flex-direction: row;
+  justify-content: space-between;
+  align-items: center;
+  padding: 8px 0;
+  border-bottom-width: 1px;
+  border-bottom-color: ${Colors.border};
+`;
+
+const PetugasLabel = styled.Text`
+  color: ${Colors.textSecondary};
   font-size: 14px;
+  flex: 1;
+`;
+
+const PetugasValue = styled.Text`
+  color: ${Colors.text};
+  font-size: 16px;
+  font-weight: 600;
+  flex: 2;
+  text-align: right;
+`;
+
+// Stats Overview Cards
+const StatsContainer = styled.View`
+  margin-bottom: 24px;
+`;
+
+const SectionTitle = styled.Text`
+  font-size: 20px;
+  font-weight: bold;
+  color: ${Colors.text};
+  margin-bottom: 16px;
+`;
+
+const StatsGrid = styled.View`
+  gap: 12px;
+`;
+
+const StatCard = styled.View<{ bgColor: string }>`
+  background-color: ${props => props.bgColor};
+  padding: 20px;
+  border-radius: 16px;
+  shadow-color: ${Colors.shadow};
+  shadow-offset: 0px 2px;
+  shadow-opacity: 0.1;
+  shadow-radius: 4px;
+  elevation: 3;
+`;
+
+const StatRow = styled.View`
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+`;
+
+const StatLeft = styled.View`
+  flex-direction: row;
+  align-items: center;
+  flex: 1;
+`;
+
+const StatInfo = styled.View`
+  margin-left: 12px;
+  flex: 1;
+`;
+
+const StatTitle = styled.Text`
+  color: #fff;
+  font-size: 16px;
+  font-weight: 600;
+`;
+
+const StatSubtitle = styled.Text`
+  color: rgba(255,255,255,0.8);
+  font-size: 12px;
+  margin-top: 2px;
+`;
+
+const StatNumber = styled.Text`
+  color: #fff;
+  font-size: 32px;
+  font-weight: bold;
+`;
+
+// Quick Actions
+const ActionsContainer = styled.View`
+  margin-bottom: 24px;
+`;
+
+const ActionsGrid = styled.View`
+  flex-direction: row;
+  flex-wrap: wrap;
+  gap: 12px;
+`;
+
+const ActionCard = styled(Pressable)`
+  background-color: ${Colors.cardBg};
+  border-radius: 16px;
+  padding: 20px;
+  width: ${(width - 56) / 2}px;
+  align-items: center;
+  shadow-color: ${Colors.shadow};
+  shadow-offset: 0px 2px;
+  shadow-opacity: 0.1;
+  shadow-radius: 4px;
+  elevation: 3;
+  border: 1px solid ${Colors.border};
+`;
+
+const ActionIcon = styled.View<{ bgColor: string }>`
+  background-color: ${props => props.bgColor};
+  width: 56px;
+  height: 56px;
+  border-radius: 16px;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 12px;
+`;
+
+const ActionTitle = styled.Text`
+  color: ${Colors.text};
+  font-size: 16px;
+  font-weight: 600;
+  text-align: center;
   margin-bottom: 4px;
 `;
 
-const Input = styled(TextInput)`
-  border-width: 1px;
-  border-color: ${Colors.border};
-  border-radius: 8px;
-  padding: 12px;
-  margin-bottom: 16px;
-  color: ${Colors.text};
+const ActionSubtitle = styled.Text`
+  color: ${Colors.textSecondary};
+  font-size: 12px;
+  text-align: center;
 `;
 
-const SubmitButton = styled(Pressable)`
-  background-color: ${Colors.primary};
-  padding: 14px;
-  border-radius: 8px;
+const LoadingContainer = styled.View`
+  flex: 1;
   align-items: center;
-  flex-direction: row;
   justify-content: center;
+  padding: 40px;
 `;
 
-const ButtonText = styled.Text`
-  color: #fff;
+const LoadingText = styled.Text`
+  color: ${Colors.textSecondary};
   font-size: 16px;
-  font-weight: bold;
-  margin-left: 8px;
+  margin-top: 12px;
 `;
 
-export default function TambahPetugas() {
+export default function InformasiAlat() {
   const router = useRouter();
+  const { loading, list, refresh } = useAparList();
+  const { badgeNumber } = useBadge();
+  const [refreshing, setRefreshing] = useState(false);
 
-  const [badgeNumber, setBadgeNumber] = useState('');
-  const [nama, setNama] = useState('');
-  const [departemen, setDepartemen] = useState('');
-  const [password, setPassword] = useState('');
-  const [submitting, setSubmitting] = useState(false);
-
-  const handleSubmit = async () => {
-    if (!badgeNumber || !nama || !departemen || !password) {
-      Alert.alert('Error', 'Semua field wajib diisi.');
-      return;
-    }
-
-    setSubmitting(true);
-    const newPetugas = {
-      id_petugas: ulid(),
-      badge_number: badgeNumber,
-      nama_petugas: nama,
-      departemen,
-      password,
-    };
-
-    try {
-      const res = await fetch('http://10.0.2.2:3000/api/petugas', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(newPetugas),
-      });
-
-      if (!res.ok) {
-        const err = await res.text();
-        throw new Error(err || res.statusText);
-      }
-
-      Alert.alert('Sukses', 'Data petugas berhasil ditambahkan.', [
-        { text: 'OK', onPress: () => router.back() },
-      ]);
-    } catch (e: any) {
-      Alert.alert('Gagal', e.message);
-    } finally {
-      setSubmitting(false);
-    }
+  const handleRefresh = async () => {
+    setRefreshing(true);
+    await refresh();
+    setRefreshing(false);
   };
+
+  // Get current month for filtering
+  const currentMonth = new Date().getMonth();
+  const currentYear = new Date().getFullYear();
+
+  // Calculate statistics for current month
+  const stats = {
+    totalAlat: list.length,
+    perluMaintenanceBulanIni: list.filter(item => {
+      if (!item.nextDueDate) return true; // Belum pernah maintenance
+      const dueDate = new Date(item.nextDueDate);
+      return dueDate.getMonth() === currentMonth && dueDate.getFullYear() === currentYear;
+    }).length,
+    sudahMaintenanceBulanIni: list.filter(item => {
+      if (!item.nextDueDate) return false;
+      const lastMaintenanceDate = new Date(item.nextDueDate);
+      lastMaintenanceDate.setMonth(lastMaintenanceDate.getMonth() - (item.interval_maintenance || 1));
+      return lastMaintenanceDate.getMonth() === currentMonth && lastMaintenanceDate.getFullYear() === currentYear;
+    }).length,
+  };
+
+  // Get petugas location from first APAR (assuming all APAR for this petugas are in same location)
+  const petugasLokasi = list.length > 0 ? list[0].lokasi_apar : 'Tidak ada data';
+
+  const actions = [
+    {
+      title: 'Lihat Semua APAR',
+      subtitle: 'Daftar lengkap alat',
+      icon: 'list.bullet',
+      bgColor: Colors.primary,
+      route: '/ManajemenApar/AparView'
+    },
+    {
+      title: 'Maintenance',
+      subtitle: 'Kelola perawatan',
+      icon: 'wrench.fill',
+      bgColor: Colors.warning,
+      route: '/ManajemenApar/AparMaintenance'
+    },
+    {
+      title: 'Tambah APAR',
+      subtitle: 'Daftarkan alat baru',
+      icon: 'plus.circle.fill',
+      bgColor: Colors.success,
+      route: '/apar/CreateApar'
+    },
+    {
+      title: 'Laporan',
+      subtitle: 'Lihat statistik',
+      icon: 'chart.bar.fill',
+      bgColor: Colors.secondary,
+      route: '/laporan/LaporanApar'
+    }
+  ];
+
+  if (loading && !refreshing) {
+    return (
+      <Container>
+        <Header>
+          <HeaderContent>
+            <HeaderLeft>
+              <Title>Informasi Alat</Title>
+              <Subtitle>Sistem Manajemen APAR</Subtitle>
+            </HeaderLeft>
+          </HeaderContent>
+        </Header>
+        <LoadingContainer>
+          <IconSymbol name="arrow.clockwise" size={32} color={Colors.textSecondary} />
+          <LoadingText>Memuat data...</LoadingText>
+        </LoadingContainer>
+      </Container>
+    );
+  }
 
   return (
     <Container>
       <Header>
-        <Title>Tambah Petugas</Title>
+        <HeaderContent>
+          <HeaderLeft>
+            <Title>Informasi Alat</Title>
+            <Subtitle>Sistem Manajemen APAR</Subtitle>
+          </HeaderLeft>
+          <RefreshButton onPress={handleRefresh} disabled={refreshing}>
+            <IconSymbol 
+              name="arrow.counterclockwise" 
+              size={20} 
+              color="#fff" 
+              style={{ transform: [{ rotate: refreshing ? '180deg' : '0deg' }] }}
+            />
+          </RefreshButton>
+        </HeaderContent>
       </Header>
 
-      {/* 2 Tombol Navigasi Baru */}
-      <NavWrapper>
-        <NavButton onPress={() => router.push('/ManajemenApar/AparView')}>
-          <IconSymbol name="book.fill" size={18} color={Colors.primary} />
-          <NavButtonText>Baca APAR</NavButtonText>
-        </NavButton>
+      <Content showsVerticalScrollIndicator={false}>
+        {/* Informasi Petugas */}
+        <PetugasCard>
+          <PetugasHeader>
+            <IconSymbol name="person.fill" size={24} color={Colors.info} />
+            <PetugasTitle>Informasi Petugas</PetugasTitle>
+          </PetugasHeader>
+          
+          <PetugasRow key="badge-row">
+            <PetugasLabel>Badge Number:</PetugasLabel>
+            <PetugasValue>{badgeNumber || 'Tidak login'}</PetugasValue>
+          </PetugasRow>
+          
+          <PetugasRow key="lokasi-row">
+            <PetugasLabel>Lokasi Kerja:</PetugasLabel>
+            <PetugasValue>{petugasLokasi}</PetugasValue>
+          </PetugasRow>
+          
+          <PetugasRow key="total-row" style={{ borderBottomWidth: 0 }}>
+            <PetugasLabel>Total APAR:</PetugasLabel>
+            <PetugasValue>{stats.totalAlat} unit</PetugasValue>
+          </PetugasRow>
+        </PetugasCard>
 
-        {/* <NavButton onPress={() => router.push('/petugas_pages/DaftarDataPetugas')}>
-          <IconSymbol name="list.bullet" size={18} color={Colors.primary} />
-          <NavButtonText>Daftar Petugas</NavButtonText>
-        </NavButton> */}
+        {/* Statistics Overview */}
+        <StatsContainer>
+          <SectionTitle>Status Alat Bulan Ini</SectionTitle>
+          <StatsGrid>
+            <StatCard key="maintenance-card" bgColor={Colors.warning}>
+              <StatRow>
+                <StatLeft>
+                  <IconSymbol name="clock.fill" size={28} color="#fff" />
+                  <StatInfo>
+                    <StatTitle>Perlu Maintenance</StatTitle>
+                    <StatSubtitle>Bulan {new Date().toLocaleDateString('id-ID', { month: 'long' })}</StatSubtitle>
+                  </StatInfo>
+                </StatLeft>
+                <StatNumber>{stats.perluMaintenanceBulanIni}</StatNumber>
+              </StatRow>
+            </StatCard>
+            
+            <StatCard key="completed-card" bgColor={Colors.success}>
+              <StatRow>
+                <StatLeft>
+                  <IconSymbol name="checkmark.circle.fill" size={28} color="#fff" />
+                  <StatInfo>
+                    <StatTitle>Sudah Maintenance</StatTitle>
+                    <StatSubtitle>Bulan {new Date().toLocaleDateString('id-ID', { month: 'long' })}</StatSubtitle>
+                  </StatInfo>
+                </StatLeft>
+                <StatNumber>{stats.sudahMaintenanceBulanIni}</StatNumber>
+              </StatRow>
+            </StatCard>
+            
+            <StatCard key="total-card" bgColor={Colors.primary}>
+              <StatRow>
+                <StatLeft>
+                  <IconSymbol name="flame.fill" size={28} color="#fff" />
+                  <StatInfo>
+                    <StatTitle>Total Alat di Lokasi</StatTitle>
+                    <StatSubtitle>{petugasLokasi}</StatSubtitle>
+                  </StatInfo>
+                </StatLeft>
+                <StatNumber>{stats.totalAlat}</StatNumber>
+              </StatRow>
+            </StatCard>
+          </StatsGrid>
+        </StatsContainer>
 
-        {/* <NavButton onPress={() => router.push('/apar/MaintenanceApar')}> */}
-        <NavButton onPress={() => router.push('/ManajemenApar/AparMaintenance')}>
-          <IconSymbol name="list.bullet" size={18} color={Colors.primary} />
-          <NavButtonText>Tes Maintenance</NavButtonText>
-        </NavButton>
+        {/* Quick Actions */}
+        <ActionsContainer>
+          <SectionTitle>Aksi Cepat</SectionTitle>
+          <ActionsGrid>
+            {actions.map((action, index) => (
+              <ActionCard 
+                key={index}
+                onPress={() => router.push(action.route as any)}
+                android_ripple={{ color: Colors.border }}
+              >
+                <ActionIcon bgColor={`${action.bgColor}20`}>
+                  <IconSymbol name={action.icon} size={28} color={action.bgColor} />
+                </ActionIcon>
+                <ActionTitle>{action.title}</ActionTitle>
+                <ActionSubtitle>{action.subtitle}</ActionSubtitle>
+              </ActionCard>
+            ))}
+          </ActionsGrid>
+        </ActionsContainer>
 
-        <NavButton onPress={() => router.push('/apar/CreateApar')}>
-          <IconSymbol name="list.bullet" size={18} color={Colors.primary} />
-          <NavButtonText>Tambah Apar</NavButtonText>
-        </NavButton>
-      </NavWrapper>
-
-      <Form>
-        <Label>Nomor Badge</Label>
-        <Input
-          placeholder="Masukkan nomor badge"
-          value={badgeNumber}
-          onChangeText={setBadgeNumber}
-          autoCapitalize="none"
-        />
-
-        <Label>Nama Lengkap</Label>
-        <Input
-          placeholder="Masukkan nama petugas"
-          value={nama}
-          onChangeText={setNama}
-        />
-
-        <Label>Departemen</Label>
-        <Input
-          placeholder="Masukkan departemen"
-          value={departemen}
-          onChangeText={setDepartemen}
-        />
-
-        <Label>Password</Label>
-        <Input
-          placeholder="Masukkan password"
-          secureTextEntry
-          value={password}
-          onChangeText={setPassword}
-        />
-
-        <SubmitButton onPress={handleSubmit} disabled={submitting}>
-          <IconSymbol name="plus.circle.fill" size={20} color="#fff" />
-          <ButtonText>
-            {submitting ? 'Menyimpan...' : 'Simpan Petugas'}
-          </ButtonText>
-        </SubmitButton>
-      </Form>
+        {/* Bottom spacing */}
+        <View style={{ height: 20 }} />
+      </Content>
     </Container>
   );
 }

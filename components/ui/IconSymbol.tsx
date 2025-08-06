@@ -32,7 +32,8 @@ const MAPPING = {
   'exclamationmark.triangle.fill': 'warning',
   'checkmark.seal.fill':  'verified',
   'checkmark.circle':    'check-circle',
-    'location':            'location-on',  // ← TAMBAHKAN INI!
+  'location':            'location-on',  // ← TAMBAHKAN INI!
+  'arrow.counterclockwise': 'refresh',
   // 'calendar':             'calendar',
   // Tambahan untuk QR
   'qrcode':               'qr-code',

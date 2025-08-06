@@ -38,7 +38,7 @@ function BadgeModal({ onSave }: { onSave: (badge: string) => void }) {
   const [input, setInput] = useState('');
 
   return (
-    <Modal visible transparent animationType="fade">
+    <Modal visible transparent animationType="fade" statusBarTranslucent>
       <View style={styles.overlay}>
         <View style={styles.container}>
           <Image

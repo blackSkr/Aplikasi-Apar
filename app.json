@@ -51,7 +51,9 @@
       "router": {},
       "eas": {
         "projectId": "d6ec4cc9-fe1e-45b4-a0df-27e7e0a2b364"
-      }
+      },
+     "devApiUrl":   "http://localhost:3000",
+     "stagApiUrl":  "http://172.16.34.189:3000"
     }
   }
 }

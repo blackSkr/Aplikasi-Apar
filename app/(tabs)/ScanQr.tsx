@@ -1,10 +1,12 @@
 // app/(tabs)/ScanQr.tsx
+
 import Colors from '@/constants/Colors';
 import { useBadge } from '@/context/BadgeContext';
 import { Ionicons } from '@expo/vector-icons';
+import { useFocusEffect } from '@react-navigation/native';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import { useRouter } from 'expo-router';
-import React, { useState } from 'react';
+import React, { useCallback, useState } from 'react';
 import { Alert, StatusBar, StyleSheet, Text } from 'react-native';
 import styled from 'styled-components/native';
 
@@ -16,9 +18,24 @@ const ScanQr: React.FC = () => {
   const [scanned, setScanned] = useState(false);
   const [qrData, setQrData] = useState<string>('');
 
+  // Reset state tiap kali screen dapat fokus (misal: setelah kembali dari detail)
+  useFocusEffect(
+    useCallback(() => {
+      setScanned(false);
+      setQrData('');
+    }, [])
+  );
+
   const handleBarcodeScanned = ({ data }: { data: string }) => {
-    setScanned(true);
-    setQrData(data);
+    try {
+      const parsed = JSON.parse(data);
+      const token = parsed.id;
+      if (!token) throw new Error();
+      setQrData(token);    // simpan hanya ID
+      setScanned(true);
+    } catch {
+      Alert.alert('QR tidak valid', 'Format QR harus JSON dengan properti `id`.');
+    }
   };
 
   if (!permission) {
@@ -33,7 +50,7 @@ const ScanQr: React.FC = () => {
     return (
       <Centered>
         <Text>Butuh izin kamera untuk scan QR.</Text>
-        <PrimaryButton onPress={requestPermission} disabled={false}>
+        <PrimaryButton onPress={requestPermission}>
           <ButtonText>BERIKAN IZIN</ButtonText>
         </PrimaryButton>
       </Centered>
@@ -54,18 +71,20 @@ const ScanQr: React.FC = () => {
             style={StyleSheet.absoluteFill}
             onBarcodeScanned={scanned ? undefined : handleBarcodeScanned}
           />
-          {!scanned ? (
-            <Overlay>
-              <Ionicons name="qr-code-outline" size={64} color="#fff" />
-              <HintText>Letakkan QR code di dalam frame</HintText>
-            </Overlay>
-          ) : (
-            <Overlay>
-              <Ionicons name="checkmark-circle-outline" size={64} color={Colors.primary} />
-              <HintText>Berhasil scan!</HintText>
-              <DataText numberOfLines={1}>{qrData}</DataText>
-            </Overlay>
-          )}
+          <Overlay>
+            {scanned ? (
+              <>
+                <Ionicons name="checkmark-circle-outline" size={64} color={Colors.primary} />
+                <HintText>Berhasil scan!</HintText>
+                <DataText numberOfLines={1}>{qrData}</DataText>
+              </>
+            ) : (
+              <>
+                <Ionicons name="qr-code-outline" size={64} color="#fff" />
+                <HintText>Letakkan QR code di dalam frame</HintText>
+              </>
+            )}
+          </Overlay>
         </ScannerContainer>
 
         <Instruction>
@@ -76,19 +95,13 @@ const ScanQr: React.FC = () => {
 
         <PrimaryButton
           onPress={() => {
-            try {
-              const parsed = JSON.parse(qrData);
-              const token = parsed.id;
-
-              if (!token || !badgeNumber) {
-                Alert.alert('QR tidak valid', 'Token atau badge tidak tersedia.');
-                return;
-              }
-
-              router.push(`/apar/MaintenanceApar?token=${encodeURIComponent(token)}&badge=${encodeURIComponent(badgeNumber)}`);
-            } catch {
-              Alert.alert('QR tidak dikenali', 'Format QR harus JSON yang valid.');
+            if (!qrData || !badgeNumber) {
+              Alert.alert('QR tidak valid', 'Token atau badge tidak tersedia.');
+              return;
             }
+            router.push(
+              `/apar/MaintenanceApar?token=${encodeURIComponent(qrData)}&badge=${encodeURIComponent(badgeNumber)}`
+            );
           }}
           disabled={!scanned}
           activeOpacity={0.8}
@@ -166,7 +179,7 @@ const Instruction = styled.Text`
   margin-bottom: 24px;
 `;
 
-const PrimaryButton = styled.TouchableOpacity<{ disabled: boolean }>`
+const PrimaryButton = styled.TouchableOpacity<{ disabled?: boolean }>`
   background-color: ${({ disabled }) =>
     disabled ? Colors.border : Colors.primary};
   padding-vertical: 16px;

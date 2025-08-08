@@ -8,7 +8,6 @@ import {
   SafeAreaView,
   SectionList,
   Text,
-  TouchableOpacity,
   View
 } from 'react-native';
 import styled from 'styled-components/native';
@@ -21,7 +20,7 @@ import Colors from '@/constants/Colors';
 import { useBadge } from '@/context/BadgeContext';
 import { useAparList } from '@/hooks/useAparList';
 import { useOfflineQueue } from '@/hooks/useOfflineQueue';
-import { flushQueue } from '@/utils/ManajemenOffline';
+import { flushQueue, getQueueCount } from '@/utils/ManajemenOffline';
 
 import { router } from 'expo-router';
 
@@ -33,40 +32,48 @@ export default function AparInformasi() {
   const { count, refreshQueue } = useOfflineQueue();
 
   const [isConnected, setIsConnected] = useState(true);
-  const [showSendOfflineBtn, setShowSendOfflineBtn] = useState(false);
   const [selectedJenis, setSelectedJenis] = useState<string | null>(null);
   const [visibleNeed, setVisibleNeed] = useState(INITIAL_COUNT);
   const [visibleDone, setVisibleDone] = useState(INITIAL_COUNT);
 
+  // reset pagination tiap filter/list berubah
   useEffect(() => {
     setVisibleNeed(INITIAL_COUNT);
     setVisibleDone(INITIAL_COUNT);
   }, [selectedJenis, list]);
 
-  const jenisList = useMemo(
-    () => Array.from(new Set(list.map(i => i.jenis_apar).filter(Boolean))),
-    [list]
-  );
-
+  // track koneksi
   useEffect(() => {
-    const unsub = NetInfo.addEventListener(s => setIsConnected(!!s.isConnected));
+    const unsub = NetInfo.addEventListener(s => {
+      console.log('[Debug] NetInfo status:', s.isConnected);
+      setIsConnected(!!s.isConnected);
+    });
     return () => unsub();
   }, []);
 
+  // fetch ulang saat online
   useEffect(() => {
-    if (isConnected) refresh();
-  }, [isConnected, refresh]);
-  useFocusEffect(
-    useCallback(() => {
+    if (isConnected) {
+      console.log('[Debug] Became online → refresh data utama');
       refresh();
-    }, [refresh])
-  );
-  useEffect(() => {
-    if (isConnected && count > 0) {
-      setShowSendOfflineBtn(true);
     }
-  }, [isConnected, count]);
+  }, [isConnected, refresh]);
 
+  // fetch ulang tiap focus
+  useFocusEffect(useCallback(() => {
+    console.log('[Debug] Screen focus → refresh data utama');
+    refresh();
+  }, [refresh]));
+
+  const handleLogout = async () => {
+    await clearBadgeNumber();
+  };
+
+  const jenisList = useMemo(
+    () =>
+      Array.from(new Set(list.map(i => i.jenis_apar).filter(Boolean))),
+    [list]
+  );
 
   const needAll = useMemo(
     () =>
@@ -74,26 +81,12 @@ export default function AparInformasi() {
           .filter(i => !selectedJenis || i.jenis_apar === selectedJenis),
     [list, selectedJenis]
   );
-  
   const doneAll = useMemo(
     () =>
       list.filter(i => i.statusMaintenance === 'Sudah')
           .filter(i => !selectedJenis || i.jenis_apar === selectedJenis),
     [list, selectedJenis]
   );
-
-  const handleLogout = async () => {
-    await clearBadgeNumber();
-  };
-
-  const handleSendOffline = async () => {
-    await flushQueue();
-    await refreshQueue();
-    await refresh(); // penting: reload ulang apar list
-    setShowSendOfflineBtn(false);
-    Alert.alert('✅ Berhasil', 'Data offline berhasil dikirim.');
-  };
-
 
   if (loading) {
     return (
@@ -113,7 +106,7 @@ export default function AparInformasi() {
       key: 'section-need-maintenance',
     },
     {
-      title: 'Sudah Maintenance', 
+      title: 'Sudah Maintenance',
       data: doneAll.slice(0, visibleDone),
       allData: doneAll,
       type: 'done',
@@ -124,22 +117,19 @@ export default function AparInformasi() {
   const renderFooter = (section: any) => {
     const total = section.allData.length;
     const visible = section.type === 'need' ? visibleNeed : visibleDone;
-
     if (total === 0) return null;
-
     return (
-      <View 
+      <View
         key={`footer-${section.type}`}
-        style={{ 
-          alignItems: 'center', 
-          paddingVertical: 8, 
-          flexDirection: 'row', 
-          justifyContent: 'center' 
+        style={{
+          alignItems: 'center',
+          paddingVertical: 8,
+          flexDirection: 'row',
+          justifyContent: 'center',
         }}
       >
         {visible < total && (
           <LoadMoreBtn
-            key={`loadmore-${section.type}`}
             onPress={() =>
               section.type === 'need'
                 ? setVisibleNeed(v => v + INITIAL_COUNT)
@@ -152,7 +142,6 @@ export default function AparInformasi() {
         )}
         {visible > INITIAL_COUNT && (
           <HideBtn
-            key={`hide-${section.type}`}
             onPress={() =>
               section.type === 'need'
                 ? setVisibleNeed(INITIAL_COUNT)
@@ -176,35 +165,6 @@ export default function AparInformasi() {
         </OfflineBanner>
       )}
 
-    {showSendOfflineBtn && (
-      <FloatingBtn onPress={() => {
-        Alert.alert(
-          'Kirim Data Offline',
-          `Kamu punya ${count} data tersimpan offline. Kirim sekarang?`,
-          [
-            { text: 'Batal', style: 'cancel' },
-            {
-              text: 'Kirim',
-              style: 'destructive',
-              onPress: async () => {
-                await flushQueue();
-                await refreshQueue();
-                const latestCount = await getQueueCount(); // Tambahan
-                if (latestCount === 0) {
-                  setShowSendOfflineBtn(false);
-                }
-                await refresh();
-                Alert.alert('✅ Berhasil', 'Data offline berhasil dikirim.');
-              }
-            }
-          ]
-        );
-      }}>
-        <FloatingText>🔄 Kirim ({count})</FloatingText>
-      </FloatingBtn>
-    )}
-
-
       <Stats
         jenisList={jenisList}
         selectedJenis={selectedJenis}
@@ -215,7 +175,7 @@ export default function AparInformasi() {
 
       <SectionList
         sections={sections}
-        keyExtractor={(item, index) => `${item.id_apar || index}-${index}`}
+        keyExtractor={(item, idx) => `${item.id_apar||idx}-${idx}`}
         renderSectionHeader={({ section }) => (
           <SectionHeader key={section.key}>
             <SectionTitle>{section.title}</SectionTitle>
@@ -223,27 +183,29 @@ export default function AparInformasi() {
         )}
         renderItem={({ item, index }) => (
           <IndexAparCard
-            key={`card-${item.id_apar || index}-${index}`}
+            key={`card-${item.id_apar||index}-${index}`}
             item={item}
             onPressDetails={() =>
               router.push({
-                pathname: "/ManajemenApar/AparMaintenance",
-                params: { id: item.id_apar }
+                pathname: '/ManajemenApar/AparMaintenance',
+                params: { id: item.id_apar },
               })
             }
           />
         )}
         renderSectionFooter={({ section }) => renderFooter(section)}
         ListEmptyComponent={
-          <EmptyContainer key="empty-component">
+          <EmptyContainer key="empty">
             <EmptyText>Data kosong.</EmptyText>
           </EmptyContainer>
         }
-        contentContainerStyle={{ paddingBottom: 20 }}
+        contentContainerStyle={{ paddingBottom: 80 }}
         stickySectionHeadersEnabled={false}
       />
-      {showSendOfflineBtn && (
-          <FloatingBtn onPress={() => {
+
+      {isConnected && count > 0 && (
+        <FloatingBtn
+          onPress={() => {
             Alert.alert(
               'Kirim Data Offline',
               `Kamu punya ${count} data tersimpan offline. Kirim sekarang?`,
@@ -253,19 +215,30 @@ export default function AparInformasi() {
                   text: 'Kirim',
                   style: 'destructive',
                   onPress: async () => {
-                    await flushQueue();
+                    console.log('[Debug] tombol Kirim ditekan, count=', count);
+                    const remaining = await flushQueue();
+                    console.log('[Debug] flushQueue → remaining =', remaining);
                     await refreshQueue();
-                    setShowSendOfflineBtn(false);
-                    Alert.alert('✅ Berhasil', 'Data offline berhasil dikirim.');
-                  }
-                }
+                    const updated = await getQueueCount();
+                    console.log('[Debug] getQueueCount →', updated);
+                    await refresh();
+                    if (updated === 0) {
+                      Alert.alert('✅ Berhasil', 'Data offline berhasil dikirim.');
+                    } else {
+                      Alert.alert(
+                        '⚠️ Sebagian gagal',
+                        `${updated} item masih tersisa di queue.`
+                      );
+                    }
+                  },
+                },
               ]
             );
-          }}>
-            <FloatingText>🔄 Kirim ({count})</FloatingText>
-          </FloatingBtn>
-        )}
-
+          }}
+        >
+          <FloatingText>🔄 Kirim ({count})</FloatingText>
+        </FloatingBtn>
+      )}
     </Container>
   );
 }
@@ -275,64 +248,53 @@ const Container = styled.View`
   flex: 1;
   background: #f5f5f5;
 `;
-
 const LoadingText = styled(Text)`
   margin-top: 12px;
   color: ${Colors.text};
   font-size: 16px;
 `;
-
 const OfflineBanner = styled(View)`
   padding: 10px;
   align-items: center;
   background: #fff3cd;
 `;
-
 const OfflineText = styled(Text)`
   color: #d50000;
   font-size: 13px;
 `;
-
 const SectionHeader = styled(View)`
   background: #f5f5f5;
   padding: 8px 16px;
 `;
-
 const SectionTitle = styled(Text)`
   font-size: 16px;
   font-weight: bold;
   color: ${Colors.text};
 `;
-
 const EmptyContainer = styled(View)`
   padding: 24px;
   align-items: center;
 `;
-
 const EmptyText = styled(Text)`
   text-align: center;
   color: ${Colors.textSecondary};
   font-size: 14px;
 `;
-
-const LoadMoreBtn = styled(TouchableOpacity)`
+const LoadMoreBtn = styled.TouchableOpacity`
   background: ${Colors.primary};
   padding: 8px 24px;
   border-radius: 20px;
 `;
-
 const LoadMoreText = styled(Text)`
   color: #fff;
   font-size: 14px;
   font-weight: 600;
 `;
-
-const HideBtn = styled(TouchableOpacity)`
+const HideBtn = styled.TouchableOpacity`
   background: #e0e0e0;
   padding: 8px 24px;
   border-radius: 20px;
 `;
-
 const HideText = styled(Text)`
   color: #444;
   font-size: 14px;
@@ -351,8 +313,7 @@ const FloatingBtn = styled.TouchableOpacity`
   shadow-opacity: 0.2;
   shadow-radius: 4px;
 `;
-
-const FloatingText = styled.Text`
+const FloatingText = styled(Text)`
   color: #fff;
   font-weight: bold;
   font-size: 14px;

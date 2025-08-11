@@ -17,6 +17,7 @@ import {
 import styled from 'styled-components/native';
 import NetInfo from '@react-native-community/netinfo';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { DETAIL_TOKEN_PREFIX } from '@/src/cacheTTL';
 
 const ALLOW_NAV_WITHOUT_CACHE_WHEN_OFFLINE = false;
 
@@ -33,20 +34,14 @@ const ScanQr: React.FC = () => {
 
   useFocusEffect(
     useCallback(() => {
-      let unsubNetInfo: ReturnType<typeof NetInfo.addEventListener> | null = null;
+      let unsub: ReturnType<typeof NetInfo.addEventListener> | null = null;
 
       setScanned(false);
       setQrToken('');
       setHasLocalDetail(false);
 
-      unsubNetInfo = NetInfo.addEventListener(s => {
-        const online = !!s.isConnected;
-        setIsConnected(online);
-      });
-
-      return () => {
-        if (unsubNetInfo) unsubNetInfo();
-      };
+      unsub = NetInfo.addEventListener(s => setIsConnected(!!s.isConnected));
+      return () => { if (unsub) unsub(); };
     }, [])
   );
 
@@ -60,12 +55,10 @@ const ScanQr: React.FC = () => {
     return null;
   };
 
-  const cacheKeyFor = (token: string) => `APAR_DETAIL_token=${encodeURIComponent(token)}`;
-
   const checkLocalDetail = useCallback(async (token: string) => {
     setCheckingCache(true);
     try {
-      const key = cacheKeyFor(token);
+      const key = `${DETAIL_TOKEN_PREFIX}${encodeURIComponent(token)}`;
       const cached = await AsyncStorage.getItem(key);
       setHasLocalDetail(!!cached);
     } finally {
@@ -95,10 +88,19 @@ const ScanQr: React.FC = () => {
       Alert.alert('QR tidak valid', 'Token atau badge tidak tersedia.');
       return;
     }
+
+    // OFFLINE: kalau token belum tersimpan, coba mapping token→id
     if (!isConnected && !hasLocalDetail && !ALLOW_NAV_WITHOUT_CACHE_WHEN_OFFLINE) {
+      const id = await AsyncStorage.getItem(`APAR_TOKEN_${qrToken}`);
+      if (id) {
+        router.push({ pathname: '/ManajemenApar/AparMaintenance', params: { id } });
+        return;
+      }
       Alert.alert('Butuh Data Lokal', 'Detail token ini belum tersimpan. Buka sekali saat online agar bisa diakses offline.');
       return;
     }
+
+    // ONLINE atau token sudah tercache → pakai token
     router.push({ pathname: '/ManajemenApar/AparMaintenance', params: { token: qrToken } });
   };
 
@@ -132,9 +134,7 @@ const ScanQr: React.FC = () => {
       {!isConnected && (
         <OfflineBanner>
           <OfflineText>
-            📴 Offline — pemindaian tetap bisa.
-            {' '}
-            {checkingCache ? 'Mengecek cache…' : (qrToken ? (hasLocalDetail ? 'Detail tersedia offline.' : 'Detail belum tersimpan.') : '')}
+            📴 Offline — pemindaian tetap bisa. {checkingCache ? 'Mengecek cache…' : (qrToken ? (hasLocalDetail ? 'Detail tersedia offline.' : 'Detail belum tersimpan.') : '')}
           </OfflineText>
         </OfflineBanner>
       )}

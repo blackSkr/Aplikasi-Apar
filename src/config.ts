@@ -2,36 +2,36 @@
 import Constants from 'expo-constants';
 import { Platform } from 'react-native';
 
-// 1. Baca manifest (fallback untuk SDK baru)
-const manifest = Constants.manifest || (Constants as any).expoConfig || {};
-const channel = (manifest.releaseChannel as string) || 'development';
+// baca extra dari app.json
+const extra: any =
+  Constants.expoConfig?.extra ??
+  (Constants as any).manifest?.extra ??
+  {};
 
-// 2. Ambil extra URLs dari app.json
-interface Extra {
-  devApiUrl:  string;
-  stagApiUrl: string;
-  prodApiUrl?: string;
-}
-const extra = (manifest.extra || {}) as Extra;
+// prioritas: env → (dev? devApi : stagApi)
+const envUrl = process.env.EXPO_PUBLIC_API_URL || extra.apiUrl;
+const devUrl = extra.devApiUrl || 'http://localhost:3000';
+const stagUrl = extra.stagApiUrl || devUrl;
 
-// 3. Pilih rawUrl berdasarkan channel
-let rawUrl = extra.devApiUrl;
-if (channel === 'staging') {
-  rawUrl = extra.stagApiUrl;
-} else if (channel === 'production' && extra.prodApiUrl) {
-  rawUrl = extra.prodApiUrl;
-}
-
-// 4. OVERRIDE CEPAT langsung ke Android emulator IP
-//    uncomment baris di bawah ini untuk paksa pakai 10.0.2.2:3000
-rawUrl = 'http://10.0.2.2:3000';
-
-// 5. Ubah hostname untuk Android emulator (tetap 10.0.2.2) atau pakai hostname asli
+let rawUrl: string = envUrl || (__DEV__ ? devUrl : stagUrl);
 const u = new URL(rawUrl);
-const hostname =
-  Platform.OS === 'android' && channel === 'development'
-    ? '10.0.2.2'
-    : u.hostname;
 
-// 6. Rekonstruksi baseUrl lengkap dengan port
-export const baseUrl = `${u.protocol}//${hostname}:${u.port}`;
+// Android emulator dev: kalau host localhost/127.0.0.1 → ganti ke 10.0.2.2
+if (
+  Platform.OS === 'android' &&
+  __DEV__ &&
+  (u.hostname === 'localhost' || u.hostname === '127.0.0.1')
+) {
+  u.hostname = '10.0.2.2';
+}
+
+// pastikan ada port
+if (!u.port) {
+  u.port = u.protocol === 'https:' ? '443' : '80';
+}
+
+export const baseUrl = `${u.protocol}//${u.hostname}:${u.port}`;
+
+if (__DEV__) {
+  console.log('[config] baseUrl =', baseUrl);
+}

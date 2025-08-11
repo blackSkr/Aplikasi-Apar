@@ -6,9 +6,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import NetInfo from '@react-native-community/netinfo';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Alert } from 'react-native';
-
-// TTL helper untuk detail cache
-import { purgeStaleDetails, touchDetailKey } from '../src/cacheTTL';
+import { purgeStaleDetails, touchDetailKey, DETAIL_ID_PREFIX, DETAIL_TOKEN_PREFIX } from '@/src/cacheTTL';
 
 export type MaintenanceStatus = 'Belum' | 'Sudah';
 export type OfflineReason = 'network' | 'server-5xx' | null;
@@ -16,8 +14,7 @@ export type OfflineReason = 'network' | 'server-5xx' | null;
 export interface AparRaw { /* …sesuaikan field… */ }
 export interface APAR extends AparRaw { daysRemaining: number; }
 
-const CONCURRENCY = 3; // aman buat device mid/low
-
+const CONCURRENCY = 3;
 const PRELOAD_FLAG_PREFIX = 'PRELOAD_FULL_FOR_';
 
 export function useAparList() {
@@ -25,12 +22,10 @@ export function useAparList() {
   const [loading, setLoading] = useState(true);
   const [rawData, setRawData] = useState<AparRaw[]>([]);
   const [offlineReason, setOfflineReason] = useState<OfflineReason>(null);
-
   const preloadingRef = useRef(false);
 
   useEffect(() => { setOfflineReason(null); }, [badgeNumber]);
 
-  // bersihkan cache detail yang sudah lama (sekali saat hook hidup)
   useEffect(() => {
     (async () => {
       try {
@@ -46,14 +41,15 @@ export function useAparList() {
     if (!detail || typeof detail !== 'object') return;
     if (detail.id_apar == null) detail.id_apar = Number(id);
 
-    const idKey = `APAR_DETAIL_id=${encodeURIComponent(id)}`;
+    const idKey = `${DETAIL_ID_PREFIX}${encodeURIComponent(id)}`;
     await AsyncStorage.setItem(idKey, JSON.stringify(detail));
     await touchDetailKey(idKey);
 
     if (token) {
-      const tkKey = `APAR_DETAIL_token=${encodeURIComponent(token)}`;
+      const tkKey = `${DETAIL_TOKEN_PREFIX}${encodeURIComponent(token)}`;
       await AsyncStorage.setItem(tkKey, JSON.stringify(detail));
       await touchDetailKey(tkKey);
+      await AsyncStorage.setItem(`APAR_TOKEN_${token}`, String(id)); // 🔁 mapping token→id
     }
   };
 
@@ -192,7 +188,7 @@ export function useAparList() {
         setRawData(mapped);
         await AsyncStorage.setItem('APAR_CACHE', JSON.stringify(mapped));
 
-        // PRELOAD semua detail → supaya scan QR offline tetap jalan
+        // PRELOAD detail → supaya scan QR offline tetap jalan
         const ids = (data || []).map((d: any) => d.id_apar).filter((v: any) => v != null).map((v: any) => String(v));
         preloadAllDetailsForBadge(ids, badgeNumber).catch(() => {});
       } catch (parseErr) {

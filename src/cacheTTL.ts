@@ -1,4 +1,4 @@
-// src/utils/cacheTTL.ts
+// src/cacheTTL.ts
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 export const DETAIL_ID_PREFIX = 'APAR_DETAIL_id=';

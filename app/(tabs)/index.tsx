@@ -22,6 +22,7 @@ import { useBadge } from '@/context/BadgeContext';
 import { useAparList } from '@/hooks/useAparList';
 import { useOfflineQueue } from '@/hooks/useOfflineQueue';
 import { usePreloadCache } from '@/hooks/usePreloadCache';
+import { runDebugProbe } from '@/src/debugProbe'; // ⬅️ debug ping & baseUrl logger
 import { router } from 'expo-router';
 
 const INITIAL_COUNT = 3;
@@ -45,6 +46,11 @@ export default function AparInformasi() {
   const [visibleDone, setVisibleDone] = useState(INITIAL_COUNT);
   const [relogKey, setRelogKey] = useState(0);
   const [forceShowFlushCta, setForceShowFlushCta] = useState(false);
+
+  // debug probe on mount (no-op di release)
+  useEffect(() => {
+    runDebugProbe('home-mount');
+  }, []);
 
   // keep stable refs
   const refreshQueueRef = useRef(refreshQueue);
@@ -106,8 +112,11 @@ export default function AparInformasi() {
         debounceTimerRef.current = setTimeout(() => {
           refreshSafeRef.current();
         }, 400);
+
+        runDebugProbe('net-change-online'); // ⬅️ log baseUrl & ping
       } else {
         setForceShowFlushCta(false);
+        runDebugProbe('net-change-offline'); // ⬅️ log status offline
       }
     });
     return () => {
@@ -142,7 +151,7 @@ export default function AparInformasi() {
     }
   }, [preloadStatus]);
 
-  // ⬇️ bersihkan preload flag pada logout, supaya login berikutnya preload lagi
+  // bersihkan preload flag pada logout, supaya login berikutnya preload lagi
   const handleLogout = async () => {
     if (badgeNumber) {
       const flagKey = `PRELOAD_FULL_FOR_${badgeNumber}`;
@@ -265,6 +274,7 @@ export default function AparInformasi() {
         stickySectionHeadersEnabled={false}
       />
 
+      {/* Tombol kirim — manual */}
       {isConnected && (count > 0 || isFlushing || forceShowFlushCta) && (
         <FloatingBtn
           onPress={() => {

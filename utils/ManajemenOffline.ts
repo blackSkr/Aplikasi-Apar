@@ -1,12 +1,12 @@
 // src/utils/ManajemenOffline.ts
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import { baseUrl } from '@/src/config';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 const QUEUE_KEY = 'OFFLINE_QUEUE';
 
 export interface PendingRequest {
   method: 'POST' | 'PUT' | 'DELETE' | string;
-  path: string;                   // full URL atau path "/api/…"
+  path: string;                   // bisa full URL atau path "/api/…"
   bodyParts?: Array<[string, any]>;
 }
 
@@ -91,8 +91,8 @@ export async function safeFetchOffline(
   }
 
   const extractBodyParts = (): Array<[string, any]> => {
-    const b: any = options.body;
-    if (b && Array.isArray(b._parts)) return b._parts as Array<[string, any]>; // RN FormData
+    const b: any = (options as any).body;
+    if (b && Array.isArray(b?._parts)) return b._parts as Array<[string, any]>; // RN FormData
     if (b && typeof b === 'object')   return Object.entries(b) as Array<[string, any]>;
     if (typeof b === 'string')        return [['__raw', b]];
     return [];
@@ -120,16 +120,21 @@ export async function safeFetchOffline(
 
 /**
  * flushQueue
- * - kirim item satu-satu (FIFO)
- * - rebuild FormData dari bodyParts (mendukung file { uri, name, type })
- * - success (2xx)  → remove dari queue
- * - non-ok         → tahan (akan dicoba lagi kemudian)
+ * - Kirim item satu-satu (FIFO)
+ * - Rebuild FormData dari bodyParts (support file { uri, name, type })
+ * - Success (2xx) → remove dari queue
+ * - Non-ok / Network error → tahan (akan dicoba lagi)
  */
 export async function flushQueue(): Promise<number> {
   let queue = await readQueue();
   console.log('[Debug][flushQueue] start, queue size =', queue.length);
 
   const remaining: PendingRequest[] = [];
+
+  const isFilePart = (v: any) =>
+    v && typeof v === 'object' &&
+    (('uri' in v && (String(v.uri).startsWith('file://') || String(v.uri).startsWith('content://')))
+      || ('type' in v && 'name' in v));
 
   for (const req of queue) {
     const method = (req.method || '').toUpperCase();
@@ -143,21 +148,50 @@ export async function flushQueue(): Promise<number> {
     const formData = new FormData();
     if (Array.isArray(req.bodyParts)) {
       for (const [k, v] of req.bodyParts) {
-        formData.append(k, v as any);
+        const preview =
+          typeof v === 'string'
+            ? (v.length > 60 ? v.slice(0, 60) + '…' : v)
+            : isFilePart(v)
+            ? `{file uri=${v?.uri} type=${v?.type} name=${v?.name}}`
+            : JSON.stringify(v).slice(0, 60) + '…';
+        console.log('[Debug][flushQueue] append', k, '→', preview);
+
+        if (isFilePart(v)) {
+          const file: any = {
+            uri: v.uri,
+            name: v.name || 'upload.jpg',
+            type: v.type || 'application/octet-stream',
+          };
+          formData.append(k, file as any);
+        } else if (typeof v === 'string') {
+          formData.append(k, v);
+        } else if (v == null) {
+          formData.append(k, '');
+        } else {
+          // amankan angka/boolean/object
+          formData.append(k, JSON.stringify(v));
+        }
       }
     }
 
     console.log('[Debug][flushQueue] sending', method, url);
     try {
-      const res = await fetch(url, { method, body: formData });
+      const res = await fetch(url, {
+        method,
+        body: formData,
+        headers: { Accept: 'application/json' }, // Content-Type otomatis oleh RN
+      });
+      console.log('[Debug][flushQueue] response', res.status);
+
       if (!res.ok) {
-        console.warn('[Debug][flushQueue] server response', res.status);
+        const text = await res.text().catch(() => '');
+        console.warn('[Debug][flushQueue] server response not ok:', res.status, text);
         remaining.push(req);
       } else {
         console.log('[Debug][flushQueue] success', url);
       }
     } catch (err) {
-      console.error('[Debug][flushQueue] network error', err);
+      console.error('[Debug][flushQueue] network error', String(err), '→', url);
       remaining.push(req);
     }
   }

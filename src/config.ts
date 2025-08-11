@@ -2,36 +2,67 @@
 import Constants from 'expo-constants';
 import { Platform } from 'react-native';
 
-// 1) baca manifest/extra dari app.json
-const manifest = (Constants.manifest || (Constants as any).expoConfig || {}) as any;
-const channel = (manifest.releaseChannel as string) || 'development';
+// Ambil expo config & extra dari app.json
+const expoCfg: any = (Constants.expoConfig || (Constants as any).manifest || {}) ?? {};
+const extra: any = expoCfg.extra ?? {};
 
-type Extra = { devApiUrl?: string; stagApiUrl?: string; prodApiUrl?: string };
-const extra = (manifest.extra || {}) as Extra;
+// 1) PRIORITAS: env override untuk APK / build (EAS)
+const envUrl =
+  process.env.EXPO_PUBLIC_API_URL ||
+  process.env.EXPO_PUBLIC_LAN_API_URL ||
+  extra.EXPO_PUBLIC_API_URL ||
+  extra.EXPO_PUBLIC_LAN_API_URL || '';
 
-// 2) FORCE ke LAN IP (minta-mu: 172.16.34.189:3000)
-const FORCE_LAN = true;
-const LAN_URL = 'http://172.16.34.189:3000';
-
-// 3) pilih rawUrl (kalau FORCE_LAN true, selalu pakai LAN_URL)
+// 2) FALLBACK (kalau envUrl kosong): pakai app.json extra
 let rawUrl =
-  (FORCE_LAN && LAN_URL) ||
-  (channel === 'production' && (extra.prodApiUrl || extra.stagApiUrl)) ||
-  (channel === 'staging' && (extra.stagApiUrl || extra.prodApiUrl)) ||
-  extra.devApiUrl ||
-  LAN_URL;
+  envUrl ||
+  extra.stagApiUrl ||          // biasanya IP LAN kamu (172.16.34.189:3000)
+  extra.devApiUrl ||           // default dev
+  'http://localhost:3000';
 
-// 4) rekonstruksi baseUrl (tanpa rewrite ke 10.0.2.2 — tetap LAN IP)
-const u = new URL(rawUrl);
-const port = u.port || (u.protocol === 'https:' ? '443' : '80');
-export const baseUrl = `${u.protocol}//${u.hostname}:${port}`;
+// 3) Parse URL
+let protocol = 'http:';
+let hostname = 'localhost';
+let port = '3000';
 
-// 5) data debug yang bisa dilog dari layar mana pun
+try {
+  const u = new URL(rawUrl);
+  protocol = u.protocol;
+  hostname = u.hostname;
+  port = u.port || (u.protocol === 'https:' ? '443' : '80');
+} catch {
+  // ignore
+}
+
+// 4) AUTO-EMULATOR: aktif HANYA saat DEVELOPER MODE (__DEV__ = true)
+//    Supaya APK rilis tidak ketimpa ke 10.0.2.2
+const hasEnvOverride = !!envUrl;
+if (!hasEnvOverride && Platform.OS === 'android' && __DEV__) {
+  hostname = '10.0.2.2';
+}
+
+// 5) Susun baseUrl final
+export const baseUrl = `${protocol}//${hostname}:${port}`;
+
+// 6) Ekspor payload debug (dipakai di index.tsx)
 export const __CONFIG_DEBUG__ = {
-  platform: Platform.OS,
-  channel,
-  extra,
-  rawUrl,
   baseUrl,
-  forcedLan: FORCE_LAN,
+  platform: Platform.OS,
+  rawUrl,
+  envUrl: hasEnvOverride ? envUrl : null,
+  extra: {
+    devApiUrl: extra.devApiUrl,
+    stagApiUrl: extra.stagApiUrl,
+    EXPO_PUBLIC_API_URL: extra.EXPO_PUBLIC_API_URL,
+    EXPO_PUBLIC_LAN_API_URL: extra.EXPO_PUBLIC_LAN_API_URL,
+  },
 };
+
+// 7) Helper log kalau mau dipanggil manual
+export function logApiConfig(tag = 'config') {
+  try {
+    console.log(`[debug][${tag}]`, JSON.stringify(__CONFIG_DEBUG__));
+  } catch {
+    console.log(`[debug][${tag}]`, __CONFIG_DEBUG__);
+  }
+}

@@ -21,7 +21,6 @@ import styled from 'styled-components/native';
 import { useBadge } from '@/context/BadgeContext';
 import { useOfflineQueue } from '@/hooks/useOfflineQueue';
 import { flushQueue, safeFetchOffline } from '@/utils/ManajemenOffline';
-import { DETAIL_ID_PREFIX, DETAIL_TOKEN_PREFIX, touchDetailKey } from '@/src/cacheTTL';
 
 type ChecklistItemState = {
   checklistId?: number;
@@ -43,6 +42,40 @@ type AparData = {
   keperluan_check: any;
 };
 
+// --- helper: normalisasi bentuk payload (online/offline/by-id/by-token) ---
+function normalizeApar(raw: any): AparData {
+  const id = Number(raw?.id_apar ?? raw?.Id ?? raw?.id ?? 0);
+  const no = String(raw?.no_apar ?? raw?.Kode ?? raw?.kode ?? '');
+  const lokasi = String(raw?.lokasi_apar ?? raw?.LokasiNama ?? raw?.lokasi ?? '');
+  const jenis = String(raw?.jenis_apar ?? raw?.JenisNama ?? raw?.jenis ?? '');
+  const defaultInterval = Number(
+    raw?.defaultIntervalBulan ?? raw?.IntervalPemeriksaanBulan ?? 0
+  );
+  const namaInt = raw?.namaIntervalPetugas ?? raw?.NamaInterval ?? undefined;
+  const blnInt =
+    raw?.bulanIntervalPetugas ?? raw?.IntervalBulan ?? undefined;
+  const nextDue = raw?.nextDueDate ?? raw?.next_due_date ?? null;
+
+  // checklist bisa berupa string JSON / array sudah jadi
+  let kc: any = raw?.keperluan_check ?? raw?.checklist ?? '[]';
+  if (typeof kc === 'string') {
+    try { kc = JSON.parse(kc); } catch { /* biarkan string, nanti diparse lagi */ }
+  }
+
+  return {
+    id_apar: id,
+    no_apar: no,
+    lokasi_apar: lokasi,
+    jenis_apar: jenis,
+    intervalPetugasId: raw?.intervalPetugasId ?? raw?.IntervalPetugasId ?? null,
+    defaultIntervalBulan: defaultInterval,
+    namaIntervalPetugas: namaInt,
+    bulanIntervalPetugas: blnInt,
+    nextDueDate: nextDue,
+    keperluan_check: kc,
+  };
+}
+
 export default function AparMaintenance() {
   const navigation = useNavigation();
   const route = useRoute();
@@ -50,12 +83,9 @@ export default function AparMaintenance() {
   const { count: queueCount, refreshQueue } = useOfflineQueue();
 
   const params = (route.params as any) || {};
-  const isById = !!params.id;
-  const isByToken = !!params.token;
-
-  const keyParam = isById
+  const keyParam = params.id
     ? `id=${encodeURIComponent(params.id)}`
-    : isByToken
+    : params.token
     ? `token=${encodeURIComponent(params.token)}`
     : '';
 
@@ -77,25 +107,35 @@ export default function AparMaintenance() {
       if (state.isConnected) {
         const remaining = await flushQueue();
         await refreshQueue();
+        if (__DEV__) console.log('[AparMaintenance] flushQueue remaining:', remaining);
       }
     });
     return () => unsub();
   }, [refreshQueue]);
 
-  const initApar = (apar: AparData) => {
+  const initApar = (raw: any, source: 'online'|'cache') => {
+    const apar = normalizeApar(raw);
+    if (__DEV__) console.log('[AparMaintenance] initApar from', source, apar);
+
     setData(apar);
+
     let arr: any[] = [];
-    if (typeof apar.keperluan_check === 'string') {
-      try { arr = JSON.parse(apar.keperluan_check); } catch { arr = []; }
-    } else if (Array.isArray(apar.keperluan_check)) {
-      arr = apar.keperluan_check;
+    const kc = apar.keperluan_check;
+    if (typeof kc === 'string') {
+      try { arr = JSON.parse(kc); } catch { arr = []; }
+    } else if (Array.isArray(kc)) {
+      arr = kc;
     }
-    setChecklistStates(arr.map(o => ({
-      checklistId: o.checklistId ?? o.Id,
-      item: o.question || o.Pertanyaan || '(no question)',
-      condition: null,
-      alasan: '',
-    })));
+
+    setChecklistStates(
+      arr.map((o: any) => ({
+        checklistId: o.checklistId ?? o.Id ?? o.id,
+        item: o.question || o.Pertanyaan || o.pertanyaan || '(no question)',
+        condition: null,
+        alasan: '',
+      }))
+    );
+
     if (apar.namaIntervalPetugas && apar.bulanIntervalPetugas) {
       setIntervalLabel(`${apar.namaIntervalPetugas} (${apar.bulanIntervalPetugas} bulan)`);
     } else {
@@ -103,6 +143,7 @@ export default function AparMaintenance() {
     }
   };
 
+  // fetch or cache
   useEffect(() => {
     (async () => {
       if (!keyParam) {
@@ -112,11 +153,13 @@ export default function AparMaintenance() {
       }
       setLoading(true);
 
-      const path = isByToken
+      const isToken = keyParam.startsWith('token=');
+      const path = isToken
         ? `/api/perawatan/with-checklist/by-token?${keyParam}&badge=${encodeURIComponent(badgeNumber||'')}`
         : `/api/peralatan/with-checklist?${keyParam}&badge=${encodeURIComponent(badgeNumber||'')}`;
 
       try {
+        if (__DEV__) console.log('[AparMaintenance] GET', path);
         const res = await safeFetchOffline(path, { method: 'GET' });
         const text = await res.text();
         let json: any = null;
@@ -127,37 +170,15 @@ export default function AparMaintenance() {
           const msg = (json && json.message) ? json.message : `HTTP ${res.status}`;
           throw new Error(msg);
         }
-        if (!json || typeof json !== 'object' || json.id_apar == null) {
-          throw new Error('Data tidak valid dari server');
-        }
+        if (!json || typeof json !== 'object') throw new Error('Data tidak valid');
 
-        initApar(json as AparData);
-
-        // cache detail dengan key konsisten + sentuh TTL
-        if (isById) {
-          const key = `${DETAIL_ID_PREFIX}${encodeURIComponent(params.id)}`;
-          await AsyncStorage.setItem(key, JSON.stringify(json));
-          await touchDetailKey(key);
-        } else if (isByToken) {
-          const tKey = `${DETAIL_TOKEN_PREFIX}${encodeURIComponent(params.token)}`;
-          await AsyncStorage.setItem(tKey, JSON.stringify(json));
-          await touchDetailKey(tKey);
-          // simpan mapping token→id buat scan offline
-          await AsyncStorage.setItem(`APAR_TOKEN_${params.token}`, String(json.id_apar));
-        }
+        initApar(json, 'online');
+        await AsyncStorage.setItem(`APAR_DETAIL_${keyParam}`, JSON.stringify(json));
       } catch (err: any) {
-        // fallback ke cache
-        const tryKeys: string[] = [];
-        if (isById) tryKeys.push(`${DETAIL_ID_PREFIX}${encodeURIComponent(params.id)}`);
-        if (isByToken) tryKeys.push(`${DETAIL_TOKEN_PREFIX}${encodeURIComponent(params.token)}`);
-
-        let cached: string | null = null;
-        for (const k of tryKeys) {
-          cached = await AsyncStorage.getItem(k);
-          if (cached) break;
-        }
+        if (__DEV__) console.warn('[AparMaintenance] fetch failed:', err?.message);
+        const cached = await AsyncStorage.getItem(`APAR_DETAIL_${keyParam}`);
         if (cached) {
-          initApar(JSON.parse(cached));
+          initApar(JSON.parse(cached), 'cache');
           Alert.alert('Offline/Cache', 'Menampilkan data dari cache.');
         } else {
           Alert.alert('Error', 'Gagal mengambil data: ' + (err?.message || 'Tidak diketahui'));
@@ -169,9 +190,7 @@ export default function AparMaintenance() {
   }, [badgeNumber, keyParam]);
 
   const updateChecklist = (i: number, changes: Partial<ChecklistItemState>) => {
-    setChecklistStates(s =>
-      s.map((x, idx) => (idx === i ? { ...x, ...changes } : x))
-    );
+    setChecklistStates(s => s.map((x, idx) => (idx === i ? { ...x, ...changes } : x)));
   };
 
   const pickImages = async () => {
@@ -179,9 +198,7 @@ export default function AparMaintenance() {
       mediaTypes: ImagePicker.MediaTypeOptions.Images,
       quality: 0.5,
     });
-    if (!result.canceled) {
-      setFotoUris(prev => [...prev, result.assets[0].uri]);
-    }
+    if (!result.canceled) setFotoUris(prev => [...prev, result.assets[0].uri]);
   };
 
   const handleSubmit = async () => {
@@ -274,19 +291,92 @@ export default function AparMaintenance() {
       style={{ flex: 1 }}
     >
       <ScrollContainer>
-        {/* …(UI sama persis punyamu)… */}
-        {/* detail card, checklist, foto, form tambahan, submit button */}
-        {/* kode UI kamu tetap, aku biarkan seperti yang kamu kirim */}
+        {/* DETAIL APAR */}
+        <Card>
+          <Label>No APAR:</Label>
+          <ReadOnlyInput value={String(data.no_apar ?? '')} />
+          <Label>Lokasi:</Label>
+          <ReadOnlyInput value={String(data.lokasi_apar ?? '')} />
+          <Label>Jenis:</Label>
+          <ReadOnlyInput value={String(data.jenis_apar ?? '')} />
+          <Label>Interval:</Label>
+          <ReadOnlyInput value={String(intervalLabel ?? '—')} />
+          <Label>Next Due:</Label>
+          <ReadOnlyInput value={String(data.nextDueDate ?? '—')} />
+        </Card>
+
+        {/* CHECKLIST */}
+        <Card>
+          <Label>Checklist Pemeriksaan:</Label>
+          {checklistStates.map((c, i) => (
+            <View key={i} style={{ marginBottom: 16 }}>
+              <QuestionText>{c.item}</QuestionText>
+              <ButtonRow>
+                <Toggle active={c.condition === 'Baik'} onPress={() => updateChecklist(i, { condition: 'Baik' })}>
+                  <ToggleText active={c.condition === 'Baik'}>Baik</ToggleText>
+                </Toggle>
+                <Toggle active={c.condition === 'Tidak Baik'} onPress={() => updateChecklist(i, { condition: 'Tidak Baik' })}>
+                  <ToggleText active={c.condition === 'Tidak Baik'}>Tidak Baik</ToggleText>
+                </Toggle>
+              </ButtonRow>
+              {c.condition === 'Tidak Baik' && (
+                <>
+                  <Label>Alasan:</Label>
+                  <Input
+                    value={c.alasan}
+                    onChangeText={t => updateChecklist(i, { alasan: t })}
+                    placeholder="Jelaskan masalah"
+                    multiline
+                  />
+                </>
+              )}
+            </View>
+          ))}
+        </Card>
+
+        {/* FOTO */}
+        <Card>
+          <Label>Foto Pemeriksaan:</Label>
+          <Pressable style={uploadStyle} onPress={pickImages}>
+            <Text>Tap untuk pilih foto…</Text>
+          </Pressable>
+          {fotoUris.map((uri, idx) => (
+            <Image key={idx} source={{ uri }} style={{ width: 100, height: 100, marginBottom: 8 }} />
+          ))}
+        </Card>
+
+        {/* FORM TAMBAHAN */}
+        <Card>
+          <Label>Kondisi Umum:</Label>
+          <Input value={kondisi} onChangeText={setKondisi} placeholder="Masukkan kondisi umum" />
+          <Label>Catatan Masalah:</Label>
+          <Input value={catatanMasalah} onChangeText={setCatatanMasalah} placeholder="Masukkan catatan masalah" multiline />
+          <Label>Rekomendasi:</Label>
+          <Input value={rekomendasi} onChangeText={setRekomendasi} placeholder="Masukkan rekomendasi" multiline />
+          <Label>Tindak Lanjut:</Label>
+          <Input value={tindakLanjut} onChangeText={setTindakLanjut} placeholder="Masukkan tindak lanjut" multiline />
+          <Label>Tekanan (bar):</Label>
+          <Input value={tekanan} onChangeText={setTekanan} placeholder="Masukkan tekanan" keyboardType="numeric" />
+          <Label>Jumlah Masalah:</Label>
+          <Input value={jumlahMasalah} onChangeText={setJumlahMasalah} placeholder="Masukkan jumlah masalah" keyboardType="numeric" />
+        </Card>
+
+        <SubmitButton disabled={submitting} onPress={handleSubmit}>
+          {submitting ? <ActivityIndicator color="#fff" /> : <SubmitText>Simpan Maintenance</SubmitText>}
+        </SubmitButton>
       </ScrollContainer>
     </KeyboardAvoidingView>
   );
 }
+
 // ========== STYLED ==========
 const Centered = styled(View)` flex: 1; justify-content: center; align-items: center; padding: 20px; `;
 const ScrollContainer = styled(ScrollView)` flex: 1; background-color: #f9fafb; `;
 const Card = styled(View)` background: #fff; margin: 12px 16px; padding: 16px; border-radius: 8px; elevation: 2; `;
 const Label = styled(Text)` font-size: 14px; font-weight: 600; color: #374151; margin-bottom: 8px; margin-top: 4px; `;
-const ReadOnlyInput = styled(TextInput).attrs({ editable: false })` background: #f3f4f6; padding: 12px; border-radius: 6px; margin-bottom: 12px; color: #6b7280; font-size: 14px; `;
+const ReadOnlyInput = styled(TextInput).attrs({ editable: false })`
+  background: #f3f4f6; padding: 12px; border-radius: 6px; margin-bottom: 12px; color: #6b7280; font-size: 14px;
+`;
 const Input = styled(TextInput)` background: #fff; border: 1px solid #d1d5db; padding: 12px; border-radius: 6px; margin-bottom: 12px; `;
 const QuestionText = styled(Text)` font-size: 15px; font-weight: 500; color: #374151; margin-bottom: 8px; `;
 const ButtonRow = styled(View)` flex-direction: row; margin-bottom: 12px; justify-content: space-between; `;

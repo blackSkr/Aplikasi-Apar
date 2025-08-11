@@ -24,8 +24,7 @@
       "permissions": [
         "android.permission.CAMERA"
       ],
-      "package": "com.satriapams.AparApps",
-      "usesCleartextTraffic": true
+      "package": "com.satriapams.AparApps"
     },
     "web": {
       "bundler": "metro",
@@ -42,6 +41,14 @@
           "resizeMode": "contain",
           "backgroundColor": "#ffffff"
         }
+      ],
+      [
+        "expo-build-properties",
+        {
+          "android": {
+            "usesCleartextTraffic": true
+          }
+        }
       ]
     ],
     "experiments": {
@@ -52,8 +59,8 @@
       "eas": {
         "projectId": "d6ec4cc9-fe1e-45b4-a0df-27e7e0a2b364"
       },
-     "devApiUrl":   "http://localhost:3000",
-     "stagApiUrl":  "http://172.16.34.189:3000"
+      "devApiUrl": "http://localhost:3000",
+      "stagApiUrl": "http://172.16.34.189:3000"
     }
   }
 }

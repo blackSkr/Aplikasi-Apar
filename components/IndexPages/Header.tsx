@@ -101,7 +101,7 @@ const Header: FC<HeaderProps> = ({ onLogout, selectedJenis }) => {
               </TitleRow>
             ) : (
               <TitleRow>
-                <JenisText numberOfLines={1} ellipsizeMode="tail">📋 Manajemen Seluruh Peralatan</JenisText>
+                <JenisText numberOfLines={1} ellipsizeMode="tail">Manajemen Alat</JenisText>
               </TitleRow>
             )}
 

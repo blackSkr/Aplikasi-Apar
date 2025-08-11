@@ -1,7 +1,10 @@
 // app/(tabs)/ScanQr.tsx
 import Colors from '@/constants/Colors';
 import { useBadge } from '@/context/BadgeContext';
+import { DETAIL_TOKEN_PREFIX } from '@/src/cacheTTL';
 import { Ionicons } from '@expo/vector-icons';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import NetInfo from '@react-native-community/netinfo';
 import { useFocusEffect } from '@react-navigation/native';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import { useRouter } from 'expo-router';
@@ -11,13 +14,10 @@ import {
   StatusBar,
   StyleSheet,
   Text,
-  View,
   TouchableOpacity,
+  View,
 } from 'react-native';
 import styled from 'styled-components/native';
-import NetInfo from '@react-native-community/netinfo';
-import AsyncStorage from '@react-native-async-storage/async-storage';
-import { DETAIL_TOKEN_PREFIX } from '@/src/cacheTTL';
 
 const ALLOW_NAV_WITHOUT_CACHE_WHEN_OFFLINE = false;
 
@@ -26,22 +26,35 @@ const ScanQr: React.FC = () => {
   const { badgeNumber } = useBadge();
 
   const [permission, requestPermission] = useCameraPermissions();
+
+  // ⬇️ tambahkan flag untuk mengontrol mount/unmount kamera
+  const [camEnabled, setCamEnabled] = useState<boolean>(false);
+
   const [scanned, setScanned] = useState(false);
   const [qrToken, setQrToken] = useState<string>('');
   const [isConnected, setIsConnected] = useState<boolean>(true);
   const [hasLocalDetail, setHasLocalDetail] = useState<boolean>(false);
   const [checkingCache, setCheckingCache] = useState<boolean>(false);
 
+  // Fokus screen → nyalakan kamera + reset state
   useFocusEffect(
     useCallback(() => {
-      let unsub: ReturnType<typeof NetInfo.addEventListener> | null = null;
+      let unsubNet: ReturnType<typeof NetInfo.addEventListener> | null = null;
 
+      // reset UI scan tiap masuk
       setScanned(false);
       setQrToken('');
       setHasLocalDetail(false);
 
-      unsub = NetInfo.addEventListener(s => setIsConnected(!!s.isConnected));
-      return () => { if (unsub) unsub(); };
+      // nyalakan kamera saat screen fokus
+      setCamEnabled(true);
+
+      unsubNet = NetInfo.addEventListener(s => setIsConnected(!!s.isConnected));
+      return () => {
+        // matikan kamera saat blur agar resource dilepas
+        setCamEnabled(false);
+        if (unsubNet) unsubNet();
+      };
     }, [])
   );
 
@@ -89,7 +102,6 @@ const ScanQr: React.FC = () => {
       return;
     }
 
-    // OFFLINE: kalau token belum tersimpan, coba mapping token→id
     if (!isConnected && !hasLocalDetail && !ALLOW_NAV_WITHOUT_CACHE_WHEN_OFFLINE) {
       const id = await AsyncStorage.getItem(`APAR_TOKEN_${qrToken}`);
       if (id) {
@@ -100,7 +112,6 @@ const ScanQr: React.FC = () => {
       return;
     }
 
-    // ONLINE atau token sudah tercache → pakai token
     router.push({ pathname: '/ManajemenApar/AparMaintenance', params: { token: qrToken } });
   };
 
@@ -134,18 +145,30 @@ const ScanQr: React.FC = () => {
       {!isConnected && (
         <OfflineBanner>
           <OfflineText>
-            📴 Offline — pemindaian tetap bisa. {checkingCache ? 'Mengecek cache…' : (qrToken ? (hasLocalDetail ? 'Detail tersedia offline.' : 'Detail belum tersimpan.') : '')}
+            📴 Offline — pemindaian tetap bisa.{' '}
+            {checkingCache
+              ? 'Mengecek cache…'
+              : qrToken
+              ? hasLocalDetail
+                ? 'Detail tersedia offline.'
+                : 'Detail belum tersimpan.'
+              : ''}
           </OfflineText>
         </OfflineBanner>
       )}
 
       <Content>
         <ScannerContainer>
-          <CameraView
-            style={StyleSheet.absoluteFill}
-            facing="back"
-            onBarcodeScanned={scanned ? undefined : handleBarcodeScanned}
-          />
+          {/* HANYA render CameraView saat camEnabled = true (screen fokus) */}
+          {camEnabled && (
+            <CameraView
+              key={camEnabled ? 'cam-on' : 'cam-off'} // paksa re-mount saat focus/blur
+              style={StyleSheet.absoluteFill}
+              facing="back"
+              onBarcodeScanned={scanned ? undefined : handleBarcodeScanned}
+            />
+          )}
+
           <Overlay>
             {scanned ? (
               <>
@@ -163,7 +186,13 @@ const ScanQr: React.FC = () => {
                   </BadgeBox>
                 )}
 
-                <SmallBtn onPress={() => { setScanned(false); setQrToken(''); setHasLocalDetail(false); }}>
+                <SmallBtn
+                  onPress={() => {
+                    setScanned(false);
+                    setQrToken('');
+                    setHasLocalDetail(false);
+                  }}
+                >
                   <SmallBtnText>Scan Ulang</SmallBtnText>
                 </SmallBtn>
               </>
@@ -182,7 +211,11 @@ const ScanQr: React.FC = () => {
 
         <PrimaryButton onPress={goToDetail} disabled={!canNavigate} activeOpacity={0.8}>
           <ButtonText>
-            {isConnected ? 'LIHAT DETAIL' : (hasLocalDetail || ALLOW_NAV_WITHOUT_CACHE_WHEN_OFFLINE ? 'LIHAT DETAIL (Offline)' : 'DETAIL BELUM TERSIMPAN')}
+            {isConnected
+              ? 'LIHAT DETAIL'
+              : hasLocalDetail || ALLOW_NAV_WITHOUT_CACHE_WHEN_OFFLINE
+              ? 'LIHAT DETAIL (Offline)'
+              : 'DETAIL BELUM TERSIMPAN'}
           </ButtonText>
         </PrimaryButton>
 

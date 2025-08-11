@@ -2,36 +2,36 @@
 import Constants from 'expo-constants';
 import { Platform } from 'react-native';
 
-// baca extra dari app.json
-const extra: any =
-  Constants.expoConfig?.extra ??
-  (Constants as any).manifest?.extra ??
-  {};
+// 1) baca manifest/extra dari app.json
+const manifest = (Constants.manifest || (Constants as any).expoConfig || {}) as any;
+const channel = (manifest.releaseChannel as string) || 'development';
 
-// prioritas: env → (dev? devApi : stagApi)
-const envUrl = process.env.EXPO_PUBLIC_API_URL || extra.apiUrl;
-const devUrl = extra.devApiUrl || 'http://localhost:3000';
-const stagUrl = extra.stagApiUrl || devUrl;
+type Extra = { devApiUrl?: string; stagApiUrl?: string; prodApiUrl?: string };
+const extra = (manifest.extra || {}) as Extra;
 
-let rawUrl: string = envUrl || (__DEV__ ? devUrl : stagUrl);
+// 2) FORCE ke LAN IP (minta-mu: 172.16.34.189:3000)
+const FORCE_LAN = true;
+const LAN_URL = 'http://172.16.34.189:3000';
+
+// 3) pilih rawUrl (kalau FORCE_LAN true, selalu pakai LAN_URL)
+let rawUrl =
+  (FORCE_LAN && LAN_URL) ||
+  (channel === 'production' && (extra.prodApiUrl || extra.stagApiUrl)) ||
+  (channel === 'staging' && (extra.stagApiUrl || extra.prodApiUrl)) ||
+  extra.devApiUrl ||
+  LAN_URL;
+
+// 4) rekonstruksi baseUrl (tanpa rewrite ke 10.0.2.2 — tetap LAN IP)
 const u = new URL(rawUrl);
+const port = u.port || (u.protocol === 'https:' ? '443' : '80');
+export const baseUrl = `${u.protocol}//${u.hostname}:${port}`;
 
-// Android emulator dev: kalau host localhost/127.0.0.1 → ganti ke 10.0.2.2
-if (
-  Platform.OS === 'android' &&
-  __DEV__ &&
-  (u.hostname === 'localhost' || u.hostname === '127.0.0.1')
-) {
-  u.hostname = '10.0.2.2';
-}
-
-// pastikan ada port
-if (!u.port) {
-  u.port = u.protocol === 'https:' ? '443' : '80';
-}
-
-export const baseUrl = `${u.protocol}//${u.hostname}:${u.port}`;
-
-if (__DEV__) {
-  console.log('[config] baseUrl =', baseUrl);
-}
+// 5) data debug yang bisa dilog dari layar mana pun
+export const __CONFIG_DEBUG__ = {
+  platform: Platform.OS,
+  channel,
+  extra,
+  rawUrl,
+  baseUrl,
+  forcedLan: FORCE_LAN,
+};

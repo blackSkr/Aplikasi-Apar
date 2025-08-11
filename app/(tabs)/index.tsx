@@ -22,15 +22,37 @@ import { useBadge } from '@/context/BadgeContext';
 import { useAparList } from '@/hooks/useAparList';
 import { useOfflineQueue } from '@/hooks/useOfflineQueue';
 import { usePreloadCache } from '@/hooks/usePreloadCache';
-import { runDebugProbe } from '@/src/debugProbe'; // ⬅️ debug ping & baseUrl logger
 import { router } from 'expo-router';
+
+// ⬇️ import baseUrl + info debug
+import { __CONFIG_DEBUG__, baseUrl } from '@/src/config';
 
 const INITIAL_COUNT = 3;
 const FORCE_CTA_MS = 12000;
 
+// probe sederhana dengan timeout, supaya kelihatan URL yang ditembak
+async function debugPing(tag: string) {
+  const url = `${baseUrl}/api/peralatan?badge=PING`;
+  console.log(`[debug][${tag}] baseUrl = ${baseUrl}`);
+  console.log(`[debug][${tag}] config =`, __CONFIG_DEBUG__);
+  console.log(`[debug][${tag}] ping GET ${url}`);
+
+  const controller = new AbortController();
+  const id = setTimeout(() => controller.abort(), 6000);
+
+  try {
+    const r = await fetch(url, { method: 'GET', signal: controller.signal });
+    console.log(`[debug][${tag}] ping status = ${r.status}`);
+  } catch (e) {
+    console.log(`[debug][${tag}] ping error =`, e);
+  } finally {
+    clearTimeout(id);
+  }
+}
+
 export default function AparInformasi() {
   const { loading, list, refresh, offlineReason } = useAparList();
-  const { badgeNumber, clearBadgeNumber } = useBadge(); // ⬅️ ambil badgeNumber juga
+  const { badgeNumber, clearBadgeNumber } = useBadge();
 
   // flush manual
   const { count, isFlushing, refreshQueue, flushNow } = useOfflineQueue({
@@ -47,9 +69,15 @@ export default function AparInformasi() {
   const [relogKey, setRelogKey] = useState(0);
   const [forceShowFlushCta, setForceShowFlushCta] = useState(false);
 
-  // debug probe on mount (no-op di release)
+  // --- DEBUG saat mount: cetak baseUrl + ping ---
   useEffect(() => {
-    runDebugProbe('home-mount');
+    (async () => {
+      const n = await NetInfo.fetch();
+      console.log(
+        `[debug][home-mount] NetInfo isConnected=${n.isConnected} reachable=${n.isInternetReachable} type=${n.type}`
+      );
+      await debugPing('home-mount');
+    })();
   }, []);
 
   // keep stable refs
@@ -91,7 +119,7 @@ export default function AparInformasi() {
     setVisibleDone(INITIAL_COUNT);
   }, [selectedJenis, list]);
 
-  // NetInfo listener
+  // NetInfo listener + DEBUG saat berubah online
   useEffect(() => {
     const unsub = NetInfo.addEventListener(async s => {
       const connected = !!s.isConnected;
@@ -103,6 +131,11 @@ export default function AparInformasi() {
       if (debounceTimerRef.current) clearTimeout(debounceTimerRef.current);
 
       if (connected) {
+        console.log(
+          `[debug][net-change-online] NetInfo isConnected=${s.isConnected} reachable=${s.isInternetReachable} type=${s.type}`
+        );
+        await debugPing('net-change-online');
+
         setRelogKey(k => k + 1); // soft remount
         setForceShowFlushCta(true);
         if (forceTimerRef.current) clearTimeout(forceTimerRef.current);
@@ -112,11 +145,8 @@ export default function AparInformasi() {
         debounceTimerRef.current = setTimeout(() => {
           refreshSafeRef.current();
         }, 400);
-
-        runDebugProbe('net-change-online'); // ⬅️ log baseUrl & ping
       } else {
         setForceShowFlushCta(false);
-        runDebugProbe('net-change-offline'); // ⬅️ log status offline
       }
     });
     return () => {
@@ -274,7 +304,6 @@ export default function AparInformasi() {
         stickySectionHeadersEnabled={false}
       />
 
-      {/* Tombol kirim — manual */}
       {isConnected && (count > 0 || isFlushing || forceShowFlushCta) && (
         <FloatingBtn
           onPress={() => {

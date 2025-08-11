@@ -30,13 +30,13 @@ export default function AparInformasi() {
   const { loading, list, refresh, offlineReason } = useAparList();
   const { clearBadgeNumber } = useBadge();
 
-  // Kirim manual (tidak auto flush)
+  // flush manual
   const { count, isFlushing, refreshQueue, flushNow } = useOfflineQueue({
     autoFlushOnReconnect: false,
     autoFlushOnForeground: false,
   });
 
-  const { status: preloadStatus, summary: preloadSummary } = usePreloadCache({ showToast: false });
+  const { status: preloadStatus } = usePreloadCache({ showToast: false });
 
   const [isConnected, setIsConnected] = useState(true);
   const [selectedJenis, setSelectedJenis] = useState<string | null>(null);
@@ -45,12 +45,12 @@ export default function AparInformasi() {
   const [relogKey, setRelogKey] = useState(0);
   const [forceShowFlushCta, setForceShowFlushCta] = useState(false);
 
-  // Refs untuk hindari re-subscribe loop
+  // keep stable refs
   const refreshQueueRef = useRef(refreshQueue);
   useEffect(() => { refreshQueueRef.current = refreshQueue; }, [refreshQueue]);
 
   const refreshingRef = useRef(false);
-  const refreshSafe = useCallback(async (reason?: string) => {
+  const refreshSafe = useCallback(async () => {
     if (preloadStatus === 'running') return;
     if (refreshingRef.current) return;
     refreshingRef.current = true;
@@ -65,13 +65,26 @@ export default function AparInformasi() {
   const forceTimerRef = useRef<NodeJS.Timeout | null>(null);
   const lastIsConnectedRef = useRef<boolean | null>(null);
 
+  // daftar jenis unik
+  const jenisList = useMemo(
+    () => Array.from(new Set(list.map(i => i.jenis_apar).filter(Boolean))),
+    [list]
+  );
+
+  // kalau filter tidak ada lagi di list → reset
+  useEffect(() => {
+    if (selectedJenis && !jenisList.includes(selectedJenis)) {
+      setSelectedJenis(null);
+    }
+  }, [jenisList, selectedJenis]);
+
   // reset pagination tiap filter/list berubah
   useEffect(() => {
     setVisibleNeed(INITIAL_COUNT);
     setVisibleDone(INITIAL_COUNT);
   }, [selectedJenis, list]);
 
-  // NetInfo listener (stable, dependency [])
+  // NetInfo listener
   useEffect(() => {
     const unsub = NetInfo.addEventListener(async s => {
       const connected = !!s.isConnected;
@@ -83,20 +96,14 @@ export default function AparInformasi() {
       if (debounceTimerRef.current) clearTimeout(debounceTimerRef.current);
 
       if (connected) {
-        // soft “relog” (remount subtree)
-        setRelogKey(k => k + 1);
-
-        // paksa tombol kirim tampil beberapa detik
+        setRelogKey(k => k + 1); // soft remount
         setForceShowFlushCta(true);
         if (forceTimerRef.current) clearTimeout(forceTimerRef.current);
         forceTimerRef.current = setTimeout(() => setForceShowFlushCta(false), FORCE_CTA_MS);
 
-        // update count queue
         await refreshQueueRef.current();
-
-        // refresh data utama (debounced)
         debounceTimerRef.current = setTimeout(() => {
-          refreshSafeRef.current('netinfo-online');
+          refreshSafeRef.current();
         }, 400);
       } else {
         setForceShowFlushCta(false);
@@ -109,7 +116,7 @@ export default function AparInformasi() {
     };
   }, []);
 
-  // tutup paksa CTA kalau antrian sudah kosong
+  // sembunyikan CTA jika queue kosong
   useEffect(() => {
     if (forceShowFlushCta && count === 0 && !isFlushing) {
       setForceShowFlushCta(false);
@@ -123,33 +130,31 @@ export default function AparInformasi() {
   // refresh saat focus
   useFocusEffect(
     useCallback(() => {
-      refreshSafeRef.current('screen-focus');
+      refreshSafeRef.current();
     }, [])
   );
 
   // setelah preload selesai → refresh sekali
   useEffect(() => {
     if (preloadStatus === 'done' || preloadStatus === 'skipped' || preloadStatus === 'error') {
-      refreshSafeRef.current('after-preload');
+      refreshSafeRef.current();
     }
   }, [preloadStatus]);
 
   const handleLogout = async () => { await clearBadgeNumber(); };
 
-  const jenisList = useMemo(
-    () => Array.from(new Set(list.map(i => i.jenis_apar).filter(Boolean))),
-    [list]
-  );
-
+  // filter data sesuai jenis
   const needAll = useMemo(
-    () => list.filter(i => i.statusMaintenance === 'Belum')
-              .filter(i => !selectedJenis || i.jenis_apar === selectedJenis),
+    () => list
+      .filter(i => i.statusMaintenance === 'Belum')
+      .filter(i => !selectedJenis || i.jenis_apar === selectedJenis),
     [list, selectedJenis]
   );
 
   const doneAll = useMemo(
-    () => list.filter(i => i.statusMaintenance === 'Sudah')
-              .filter(i => !selectedJenis || i.jenis_apar === selectedJenis),
+    () => list
+      .filter(i => i.statusMaintenance === 'Sudah')
+      .filter(i => !selectedJenis || i.jenis_apar === selectedJenis),
     [list, selectedJenis]
   );
 
@@ -163,8 +168,8 @@ export default function AparInformasi() {
   }
 
   const sections = [
-    { title: 'Perlu Maintenance',  data: needAll.slice(0, visibleNeed), allData: needAll, type: 'need', key: 'section-need-maintenance' },
-    { title: 'Sudah Maintenance', data: doneAll.slice(0, visibleDone), allData: doneAll, type: 'done', key: 'section-sudah-maintenance' },
+    { title: 'Perlu Inspeksi',  data: needAll.slice(0, visibleNeed), allData: needAll, type: 'need', key: 'section-need' },
+    { title: 'Sudah Inspeksi', data: doneAll.slice(0, visibleDone), allData: doneAll, type: 'done', key: 'section-done' },
   ];
 
   const renderFooter = (section: any) => {
@@ -202,9 +207,9 @@ export default function AparInformasi() {
 
   return (
     <Container key={relogKey}>
-      <Header onLogout={handleLogout} />
+      {/* KIRIM selectedJenis ke Header agar judul menampilkan jenis terpilih */}
+      <Header onLogout={handleLogout} selectedJenis={selectedJenis} />
 
-      {/* Banner koneksi/server */}
       {!isConnected && (
         <OfflineBanner>
           <OfflineText>📴 Kamu sedang offline.</OfflineText>
@@ -242,12 +247,18 @@ export default function AparInformasi() {
           />
         )}
         renderSectionFooter={({ section }) => renderFooter(section)}
-        ListEmptyComponent={<EmptyContainer key="empty"><EmptyText>Data kosong.</EmptyText></EmptyContainer>}
+        ListEmptyComponent={
+          <EmptyContainer key="empty">
+            <EmptyText>
+              {selectedJenis ? `Tidak ada data untuk jenis "${selectedJenis}".` : 'Data kosong.'}
+            </EmptyText>
+          </EmptyContainer>
+        }
         contentContainerStyle={{ paddingBottom: 80 }}
         stickySectionHeadersEnabled={false}
       />
 
-      {/* Tombol kirim — manual + dipaksa tampil sesaat setelah online */}
+      {/* Tombol kirim — manual */}
       {isConnected && (count > 0 || isFlushing || forceShowFlushCta) && (
         <FloatingBtn
           onPress={() => {
@@ -266,7 +277,7 @@ export default function AparInformasi() {
                   onPress: async () => {
                     await flushNow();
                     await refreshQueueRef.current();
-                    await refreshSafeRef.current('after-flush');
+                    await refreshSafeRef.current();
                     if (count === 0) {
                       Alert.alert('✅ Berhasil', 'Data offline berhasil dikirim.');
                     }
@@ -279,25 +290,6 @@ export default function AparInformasi() {
           <FloatingText>{isFlushing ? '⏳ Mengirim…' : `🔄 Kirim (${count})`}</FloatingText>
         </FloatingBtn>
       )}
-
-      {/* {__DEV__ && (
-        <DebugWrap>
-          <DebugTitle>Preload: {preloadStatus}</DebugTitle>
-          <DebugLine>List: {preloadSummary.listCount}</DebugLine>
-          <DebugLine>Detail OK: {preloadSummary.detailSaved}/{preloadSummary.detailRequested}</DebugLine>
-          {preloadSummary.detailFailed > 0 && (
-            <>
-              <DebugLine>Gagal: {preloadSummary.detailFailed}</DebugLine>
-              <DebugFailedIds numberOfLines={2} ellipsizeMode="tail">
-                IDs gagal: {preloadSummary.failedIds.join(', ')}
-              </DebugFailedIds>
-            </>
-          )}
-          <DebugLine>Online: {isConnected ? 'ya' : 'tidak'}</DebugLine>
-          <DebugLine>Queue: {count} | Flushing: {isFlushing ? 'ya' : 'tidak'}</DebugLine>
-          <DebugLine>Force CTA: {forceShowFlushCta ? 'ya' : 'tidak'}</DebugLine>
-        </DebugWrap>
-      )} */}
     </Container>
   );
 }
@@ -321,12 +313,3 @@ const FloatingBtn = styled.TouchableOpacity`
   shadow-color: #000; shadow-offset: 0px 2px; shadow-opacity: 0.2; shadow-radius: 4px;
 `;
 const FloatingText = styled(Text)` color: #fff; font-weight: bold; font-size: 14px; `;
-
-/* Debug panel (dev only) */
-const DebugWrap = styled(View)`
-  position: absolute; left: 12px; bottom: 20px; padding: 10px 12px;
-  background: rgba(0,0,0,0.75); border-radius: 8px; max-width: 75%;
-`;
-const DebugTitle = styled(Text)` color: #fff; font-weight: 700; margin-bottom: 4px; `;
-const DebugLine = styled(Text)` color: #e5e7eb; font-size: 12px; `;
-const DebugFailedIds = styled(Text)` color: #fca5a5; font-size: 11px; margin-top: 2px; `;

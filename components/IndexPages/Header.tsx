@@ -5,23 +5,39 @@ import { Ionicons } from '@expo/vector-icons';
 import { useNetInfo } from '@react-native-community/netinfo';
 import Constants from 'expo-constants';
 import { LinearGradient } from 'expo-linear-gradient';
-import React, { FC, useEffect, useState } from 'react';
+import React, { FC, useEffect, useMemo, useState } from 'react';
 import { GestureResponderEvent } from 'react-native';
 import styled from 'styled-components/native';
 import { baseUrl } from '../../src/config';
 
 type HeaderProps = {
   onLogout: (e: GestureResponderEvent) => void;
+  /** Nama jenis yang dipilih (contoh: "CO2", "Dry Powder").
+   * Jika null/undefined → header akan menampilkan "📋 Manajemen Seluruh Peralatan"
+   */
   selectedJenis?: string | null;
 };
 
+const prettify = (s?: string | null) => {
+  if (!s) return '';
+  const str = s.trim();
+  if (!str) return '';
+  return str
+    .split(' ')
+    .map(w => (w.length ? w[0].toUpperCase() + w.slice(1) : ''))
+    .join(' ');
+};
+
 const Header: FC<HeaderProps> = ({ onLogout, selectedJenis }) => {
-  const [now, setNow]         = useState(new Date());
-  const [lokasi, setLokasi]   = useState<string>('');
+  const [now, setNow] = useState(new Date());
+  const [lokasi, setLokasi] = useState<string>('');
   const [loadingLokasi, setLoadingLokasi] = useState(false);
-  const netInfo    = useNetInfo();
-  const isConnected = netInfo.isConnected;
+
+  const netInfo = useNetInfo();
+  const isConnected = !!netInfo.isConnected;
   const { badgeNumber } = useBadge();
+
+  const jenisLabel = useMemo(() => prettify(selectedJenis), [selectedJenis]);
 
   useEffect(() => {
     let ignore = false;
@@ -32,10 +48,10 @@ const Header: FC<HeaderProps> = ({ onLogout, selectedJenis }) => {
       }
       setLoadingLokasi(true);
       try {
-        const res  = await fetch(`${baseUrl}/api/petugas/lokasi/${badgeNumber}`);
+        const res = await fetch(`${baseUrl}/api/petugas/lokasi/${encodeURIComponent(badgeNumber)}`);
         if (!res.ok) throw new Error('not found');
         const data = await res.json();
-        if (!ignore) setLokasi(data.lokasi || '');
+        if (!ignore) setLokasi(data?.lokasi || '');
       } catch {
         if (!ignore) setLokasi('');
       } finally {
@@ -65,25 +81,32 @@ const Header: FC<HeaderProps> = ({ onLogout, selectedJenis }) => {
   else if (hour < 18) greeting = 'Selamat sore';
   else greeting = 'Selamat malam';
 
-  const subtitle = badgeNumber
-    ? `${greeting}, ${badgeNumber}!`
-    : `${greeting}!`;
+  const subtitle = badgeNumber ? `${greeting}, ${badgeNumber}!` : `${greeting}!`;
 
   return (
     <HeaderContainer>
       <TopRow>
         <LogoTitle>
           <LogoWrapper>
-            <Logo
-              source={require('../../assets/images/kpc-logo.png')}
-              resizeMode="contain"
-            />
+            <Logo source={require('../../assets/images/kpc-logo.png')} resizeMode="contain" />
           </LogoWrapper>
+
           <TitleGroup>
-            <TitleText>
-              Manajemen {selectedJenis ? `- ${selectedJenis}` : ''}
-            </TitleText>
-            <SubtitleText>{subtitle}</SubtitleText>
+            {/* Judul dinamis: jika ada jenis → tampilkan “Manajemen – Jenis”, else fallback menarik */}
+            {jenisLabel ? (
+              <TitleRow>
+                <TitleText numberOfLines={1} ellipsizeMode="tail">Manajemen</TitleText>
+                <Dash />
+                <JenisText numberOfLines={1} ellipsizeMode="tail">{jenisLabel}</JenisText>
+              </TitleRow>
+            ) : (
+              <TitleRow>
+                <JenisText numberOfLines={1} ellipsizeMode="tail">📋 Manajemen Seluruh Peralatan</JenisText>
+              </TitleRow>
+            )}
+
+            <SubtitleText numberOfLines={1} ellipsizeMode="tail">{subtitle}</SubtitleText>
+
             <LokasiText>
               <Ionicons name="location-outline" size={12} color="#fff" />
               <LokasiLabel numberOfLines={1}>
@@ -96,10 +119,12 @@ const Header: FC<HeaderProps> = ({ onLogout, selectedJenis }) => {
             </LokasiText>
           </TitleGroup>
         </LogoTitle>
+
         <LogoutButton onPress={onLogout} accessibilityLabel="Logout">
           <Ionicons name="log-out-outline" size={24} color="#fff" />
         </LogoutButton>
       </TopRow>
+
       <TimeRow>
         <Ionicons name="calendar-outline" size={14} color="rgba(255,255,255,0.8)" />
         <TimeText>{dateStr}</TimeText>
@@ -123,6 +148,7 @@ const Header: FC<HeaderProps> = ({ onLogout, selectedJenis }) => {
 
 export default Header;
 
+/* =================== styled =================== */
 const HeaderContainer = styled(LinearGradient).attrs({
   colors: [Colors.primaryheader, Colors.primaryLight],
   start: { x: 0, y: 0 },
@@ -146,6 +172,7 @@ const TopRow = styled.View`
 const LogoTitle = styled.View`
   flex-direction: row;
   align-items: center;
+  flex: 1;
 `;
 
 const LogoWrapper = styled.View`
@@ -164,12 +191,31 @@ const Logo = styled.Image`
   height: 28px;
 `;
 
-const TitleGroup = styled.View``;
+const TitleGroup = styled.View`
+  flex: 1;
+`;
+
+const TitleRow = styled.View`
+  flex-direction: row;
+  align-items: baseline;
+  max-width: 92%;
+`;
 
 const TitleText = styled.Text`
   color: #fff;
   font-size: 20px;
   font-weight: 700;
+`;
+
+const Dash = styled.View`
+  width: 6px;
+`;
+
+const JenisText = styled.Text`
+  color: #fff;
+  font-size: 20px;
+  font-weight: 700;
+  opacity: 0.95;
 `;
 
 const SubtitleText = styled.Text`
@@ -189,13 +235,14 @@ const LokasiLabel = styled.Text`
   font-size: 13px;
   margin-left: 4px;
   opacity: 0.85;
-  max-width: 170px;
+  max-width: 200px;
 `;
 
 const LogoutButton = styled.TouchableOpacity`
   padding: 8px;
   background-color: rgba(255,255,255,0.3);
   border-radius: 16px;
+  margin-left: 12px;
 `;
 
 const TimeRow = styled.View`

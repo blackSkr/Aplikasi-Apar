@@ -1,4 +1,3 @@
-import { IconSymbol } from '@/components/ui/IconSymbol';
 import Colors from '@/constants/Colors';
 import React, { useState } from 'react';
 import { Modal, Pressable, Text } from 'react-native';
@@ -73,12 +72,12 @@ export default function Options() {
 
   return (
     <>
-      <Row>
+      {/* <Row>
         <OptionCard onPress={() => setModalVisible(true)}>
           <IconSymbol name="calendar" size={24} color={Colors.primary} />
           <OptionLabel>Jadwal Pemeliharaan</OptionLabel>
         </OptionCard>
-      </Row>
+      </Row> */}
 
       <Modal
         transparent

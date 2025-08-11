@@ -1,126 +1,157 @@
 // src/utils/ManajemenOffline.ts
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { baseUrl } from '../src/config';
+import { baseUrl } from '@/src/config';
 
 const QUEUE_KEY = 'OFFLINE_QUEUE';
 
 export interface PendingRequest {
   method: 'POST' | 'PUT' | 'DELETE' | string;
-  path: string;                   // either a full URL or just “/api/…” path
+  path: string;                   // full URL atau path "/api/…"
   bodyParts?: Array<[string, any]>;
 }
 
-async function enqueueRequest(req: PendingRequest) {
+const log  = (...a: any[]) => { if (__DEV__) console.log('[Offline]', ...a); };
+const warn = (...a: any[]) => { if (__DEV__) console.warn('[Offline]', ...a); };
+
+async function readQueue(): Promise<PendingRequest[]> {
   const raw = (await AsyncStorage.getItem(QUEUE_KEY)) || '[]';
-  const queue: PendingRequest[] = JSON.parse(raw);
-  queue.push(req);
-  await AsyncStorage.setItem(QUEUE_KEY, JSON.stringify(queue));
-  console.log('[Debug][OfflineQueue] enqueue → size =', queue.length);
+  try {
+    const arr = JSON.parse(raw);
+    return Array.isArray(arr) ? arr : [];
+  } catch {
+    return [];
+  }
+}
+
+async function writeQueue(q: PendingRequest[]) {
+  await AsyncStorage.setItem(QUEUE_KEY, JSON.stringify(q));
+  log('writeQueue → len =', q.length);
+}
+
+async function enqueueRequest(req: PendingRequest) {
+  const q = await readQueue();
+  q.push(req);
+  await writeQueue(q);
+  log('enqueue', { method: req.method, path: req.path, parts: req.bodyParts?.length ?? 0 });
 }
 
 export async function getQueueCount(): Promise<number> {
-  const raw = (await AsyncStorage.getItem(QUEUE_KEY)) || '[]';
-  const queue: PendingRequest[] = JSON.parse(raw);
-  const len = Array.isArray(queue) ? queue.length : 0;
+  const q = await readQueue();
+  const len = q.length;
   console.log('[Debug][OfflineQueue] getQueueCount =', len);
   return len;
 }
 
+function toUrl(pathOrUrl: string) {
+  const isFullUrl = /^https?:\/\//i.test(pathOrUrl);
+  return isFullUrl ? pathOrUrl : `${baseUrl}${pathOrUrl}`;
+}
+
+function offlineResponse(
+  reason: 'network' | 'server-5xx' = 'network'
+): Response & { offline?: boolean; reason?: string } {
+  return new Response(JSON.stringify({ offline: true, reason }), {
+    status: 200,
+    headers: { 'Content-Type': 'application/json' },
+  }) as Response & { offline?: boolean; reason?: string };
+}
+
 /**
- * safeFetchOffline:
- * - If you pass a full URL (http…): use it, else prefix baseUrl.
- * - GET: always try fetch(); on throw → fallback offline.
- * - non-GET: try fetch(); on throw → enqueue + fake offline response.
+ * safeFetchOffline
+ * - GET:
+ *    - 2xx/3xx/4xx → return response
+ *    - 5xx / network error → return { offline:true, reason }
+ * - POST/PUT/DELETE:
+ *    - network error → enqueue + { offline:true, reason:'network' }
+ *    - 5xx           → enqueue + { offline:true, reason:'server-5xx' }
+ *    - else          → return response
  */
 export async function safeFetchOffline(
   pathOrUrl: string,
   options: RequestInit = {}
-): Promise<Response> {
+): Promise<Response & { offline?: boolean; reason?: string }> {
   const method = (options.method || 'GET').toUpperCase();
-  const isFullUrl = /^https?:\/\//i.test(pathOrUrl);
-  const url = isFullUrl ? pathOrUrl : `${baseUrl}${pathOrUrl}`;
+  const url = toUrl(pathOrUrl);
 
   console.log(`[Debug][safeFetchOffline] → ${method} ${url}`);
 
   if (method === 'GET') {
     try {
       const res = await fetch(url, options);
-      console.log('[Debug][safeFetchOffline][GET] success', res.status);
-      return res;
+      console.log('[Debug][safeFetchOffline][GET] status', res.status);
+      if (res.status >= 500) {
+        warn('GET got 5xx → treat as offline');
+        return offlineResponse('server-5xx');
+      }
+      return res as any;
     } catch (err) {
-      console.warn('[Debug][safeFetchOffline][GET] failed, fallback offline', err);
-      return new Response(JSON.stringify({ offline: true }), {
-        status: 200,
-        headers: { 'Content-Type': 'application/json' },
-      });
+      console.warn('[Debug][safeFetchOffline][GET] network error, fallback offline', err);
+      return offlineResponse('network');
     }
   }
 
-  // POST/PUT/DELETE
+  const extractBodyParts = (): Array<[string, any]> => {
+    const b: any = options.body;
+    if (b && Array.isArray(b._parts)) return b._parts as Array<[string, any]>; // RN FormData
+    if (b && typeof b === 'object')   return Object.entries(b) as Array<[string, any]>;
+    if (typeof b === 'string')        return [['__raw', b]];
+    return [];
+  };
+
+  const enqueueFromOptions = async (reason: 'network' | 'server-5xx') => {
+    const parts = extractBodyParts();
+    await enqueueRequest({ method, path: pathOrUrl, bodyParts: parts });
+    return offlineResponse(reason);
+  };
+
   try {
     const res = await fetch(url, options);
-    console.log(`[Debug][safeFetchOffline][${method}] success`, res.status);
-    return res;
+    console.log(`[Debug][safeFetchOffline][${method}] status`, res.status);
+    if (res.status >= 500) {
+      warn(`${method} got ${res.status} → enqueue for retry`);
+      return await enqueueFromOptions('server-5xx');
+    }
+    return res as any;
   } catch (err) {
     console.warn(`[Debug][safeFetchOffline][${method}] network error, enqueue`, err);
-
-    // extract bodyParts for FormData re-build
-    let parts: Array<[string, any]> = [];
-    const body = options.body as any;
-    if (body && Array.isArray(body._parts)) parts = body._parts;
-    else if (body && typeof body === 'object') parts = Object.entries(body);
-
-    await enqueueRequest({ method, path: pathOrUrl, bodyParts: parts });
-
-    return new Response(JSON.stringify({ offline: true }), {
-      status: 200,
-      headers: { 'Content-Type': 'application/json' },
-    });
+    return await enqueueFromOptions('network');
   }
 }
 
 /**
- * flushQueue: attempt to send all queued POST/PUT/DELETE items.
- *   - re-builds full URL if needed
- *   - re-builds FormData
- *   - on success: drop item; on failure: keep in remaining
+ * flushQueue
+ * - kirim item satu-satu (FIFO)
+ * - rebuild FormData dari bodyParts (mendukung file { uri, name, type })
+ * - success (2xx)  → remove dari queue
+ * - non-ok         → tahan (akan dicoba lagi kemudian)
  */
 export async function flushQueue(): Promise<number> {
-  const raw = (await AsyncStorage.getItem(QUEUE_KEY)) || '[]';
-  let queue: PendingRequest[];
-  try {
-    queue = JSON.parse(raw);
-  } catch (err) {
-    console.error('[Debug][flushQueue] JSON.parse error', err);
-    queue = [];
-  }
+  let queue = await readQueue();
   console.log('[Debug][flushQueue] start, queue size =', queue.length);
 
   const remaining: PendingRequest[] = [];
 
   for (const req of queue) {
     const method = (req.method || '').toUpperCase();
-    if (!req.path || !['POST','PUT','DELETE'].includes(method)) {
+    if (!req.path || !['POST', 'PUT', 'DELETE'].includes(method)) {
       console.log('[Debug][flushQueue] drop invalid item', req);
       continue;
     }
 
-    const isFullUrl = /^https?:\/\//i.test(req.path);
-    const url = isFullUrl ? req.path : `${baseUrl}${req.path}`;
+    const url = toUrl(req.path);
 
     const formData = new FormData();
-    if (req.bodyParts) {
+    if (Array.isArray(req.bodyParts)) {
       for (const [k, v] of req.bodyParts) {
-        formData.append(k, v);
+        formData.append(k, v as any);
       }
     }
 
     console.log('[Debug][flushQueue] sending', method, url);
     try {
-      // allow RN to set multipart boundary
       const res = await fetch(url, { method, body: formData });
       if (!res.ok) {
-        console.warn('[Debug][flushQueue] server error', res.status);
+        console.warn('[Debug][flushQueue] server response', res.status);
         remaining.push(req);
       } else {
         console.log('[Debug][flushQueue] success', url);
@@ -132,15 +163,7 @@ export async function flushQueue(): Promise<number> {
   }
 
   console.log('[Debug][flushQueue] remaining =', remaining.length);
-  await AsyncStorage.setItem(QUEUE_KEY, JSON.stringify(remaining));
+  await writeQueue(remaining);
   return remaining.length;
 }
-
-
-
-// auto-flush saat online
-// NetInfo.addEventListener(state => {
-//   if (state.isConnected) {
-//     flushQueue();
-//   }
-// });
+// (auto-flush dikendalikan oleh hook/useOfflineQueue)

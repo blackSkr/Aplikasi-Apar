@@ -1,7 +1,6 @@
-import { useBadge } from '@/context/BadgeContext';
-import { baseUrl as configBaseUrl } from '@/src/config';
-import { enqueueRequest } from '@/utils/ManajemenOffline';
+// app/ManajemenApar/AparMaintenance.tsx
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import NetInfo from '@react-native-community/netinfo';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import * as ImagePicker from 'expo-image-picker';
 import React, { useEffect, useState } from 'react';
@@ -19,11 +18,15 @@ import {
 } from 'react-native';
 import styled from 'styled-components/native';
 
+import { useBadge } from '@/context/BadgeContext';
+import { useOfflineQueue } from '@/hooks/useOfflineQueue';
+import { flushQueue, safeFetchOffline } from '@/utils/ManajemenOffline';
+
 type ChecklistItemState = {
   checklistId?: number;
   item: string;
   condition: 'Baik' | 'Tidak Baik' | null;
-  alasan?: string;
+  alasan: string;
 };
 
 type AparData = {
@@ -31,12 +34,10 @@ type AparData = {
   no_apar: string;
   lokasi_apar: string;
   jenis_apar: string;
-  current_petugas_id: number;
   intervalPetugasId: number | null;
+  defaultIntervalBulan: number;
   namaIntervalPetugas?: string;
   bulanIntervalPetugas?: number;
-  defaultIntervalBulan?: number;
-  last_inspection_date?: string | null;
   nextDueDate?: string | null;
   keperluan_check: any;
 };
@@ -45,13 +46,8 @@ export default function AparMaintenance() {
   const navigation = useNavigation();
   const route = useRoute();
   const { badgeNumber } = useBadge();
+  const { count: queueCount, refreshQueue } = useOfflineQueue();
 
-  // Determine API base URL
-  const apiBaseUrl = Platform.OS === 'android'
-    ? 'http://10.0.2.2:3000'
-    : configBaseUrl;
-
-  // Params: either id from card tap or token from QR scan
   const params = (route.params as any) || {};
   const keyParam = params.id
     ? `id=${encodeURIComponent(params.id)}`
@@ -63,7 +59,7 @@ export default function AparMaintenance() {
   const [submitting, setSubmitting] = useState(false);
   const [data, setData] = useState<AparData | null>(null);
   const [checklistStates, setChecklistStates] = useState<ChecklistItemState[]>([]);
-  const [fotoPemeriksaan, setFotoPemeriksaan] = useState<string[]>([]);
+  const [fotoUris, setFotoUris] = useState<string[]>([]);
   const [intervalLabel, setIntervalLabel] = useState('—');
   const [kondisi, setKondisi] = useState('');
   const [catatanMasalah, setCatatanMasalah] = useState('');
@@ -72,41 +68,48 @@ export default function AparMaintenance() {
   const [tekanan, setTekanan] = useState('');
   const [jumlahMasalah, setJumlahMasalah] = useState('');
 
-  // Init data & checklist state
+  // 1) Auto‐flush queue whenever connection is regained
+  useEffect(() => {
+    const unsub = NetInfo.addEventListener(async state => {
+      console.log('[AparMaintenance] NetInfo:', state.isConnected);
+      if (state.isConnected) {
+        console.log('[AparMaintenance] Now online → flushing queue');
+        const remaining = await flushQueue();
+        console.log('[AparMaintenance] flushQueue remaining:', remaining);
+        await refreshQueue();
+      }
+    });
+    return () => unsub();
+  }, [refreshQueue]);
+
+  // 2) Initialize form & checklist states
   const initApar = (apar: AparData) => {
     console.debug('[AparMaintenance] initApar', apar);
     setData(apar);
+
+    // parse checklist array
     let arr: any[] = [];
     if (typeof apar.keperluan_check === 'string') {
       try { arr = JSON.parse(apar.keperluan_check); } catch { arr = []; }
     } else if (Array.isArray(apar.keperluan_check)) {
       arr = apar.keperluan_check;
     }
-    setChecklistStates(
-      arr.map(o => {
-        const question =
-          typeof o.question === 'string' ? o.question :
-          typeof o.Pertanyaan === 'string' ? o.Pertanyaan :
-          '(no question)';
-        const checklistId =
-          typeof o.checklistId === 'number' ? o.checklistId :
-          typeof o.Id === 'number' ? o.Id :
-          undefined;
-        return { checklistId, item: question, condition: null, alasan: '' };
-      })
-    );
+
+    setChecklistStates(arr.map(o => ({
+      checklistId: o.checklistId ?? o.Id,
+      item: o.question || o.Pertanyaan || '(no question)',
+      condition: null,
+      alasan: '',
+    })));
+
     if (apar.namaIntervalPetugas && apar.bulanIntervalPetugas) {
-      setIntervalLabel(
-        `${apar.namaIntervalPetugas} (${apar.bulanIntervalPetugas} bulan)`
-      );
+      setIntervalLabel(`${apar.namaIntervalPetugas} (${apar.bulanIntervalPetugas} bulan)`);
     } else {
-      setIntervalLabel(
-        `Default (${apar.defaultIntervalBulan ?? '-'} bulan)`
-      );
+      setIntervalLabel(`Default (${apar.defaultIntervalBulan} bulan)`);
     }
   };
 
-  // Fetch detail
+  // 3) Fetch detail with safeFetchOffline + cache fallback
   useEffect(() => {
     (async () => {
       if (!keyParam) {
@@ -115,28 +118,25 @@ export default function AparMaintenance() {
         return;
       }
       setLoading(true);
-      const url = `${apiBaseUrl}/api/peralatan/with-checklist?${keyParam}&badge=${encodeURIComponent(badgeNumber||'')}`;
-      console.log('[AparMaintenance] fetch URL:', url);
+
+      const path = `/api/peralatan/with-checklist?${keyParam}&badge=${encodeURIComponent(badgeNumber||'')}`;
+      console.log('[AparMaintenance] safeFetchOffline GET', path);
+
       try {
-        const res = await fetch(url);
-        if (!res.ok) {
-          const txt = await res.text();
-          throw new Error(`HTTP ${res.status}: ${txt}`);
-        }
-        const aparData: AparData = await res.json();
-        initApar(aparData);
-        await AsyncStorage.setItem(
-          `APAR_DETAIL_${params.id||params.token}`,
-          JSON.stringify(aparData)
-        );
+        const res = await safeFetchOffline(path, { method: 'GET' });
+        const json = await res.json();
+        console.log('[AparMaintenance] GET response', json);
+        if ((json as any).offline) throw new Error('Offline fallback');
+        initApar(json as AparData);
+        await AsyncStorage.setItem(`APAR_DETAIL_${keyParam}`, JSON.stringify(json));
       } catch (err: any) {
-        console.warn('[AparMaintenance] fetch failed:', err);
-        const cached = await AsyncStorage.getItem(`APAR_DETAIL_${params.id||params.token}`);
+        console.warn('[AparMaintenance] fetch failed:', err.message);
+        const cached = await AsyncStorage.getItem(`APAR_DETAIL_${keyParam}`);
         if (cached) {
           initApar(JSON.parse(cached));
-          Alert.alert('Offline Mode','Menampilkan data dari cache.');
+          Alert.alert('Offline Mode', 'Menampilkan data dari cache.');
         } else {
-          Alert.alert('Error','Gagal mengambil data: '+err.message);
+          Alert.alert('Error', 'Gagal mengambil data: ' + err.message);
         }
       } finally {
         setLoading(false);
@@ -144,8 +144,11 @@ export default function AparMaintenance() {
     })();
   }, [badgeNumber, keyParam]);
 
-  const updateChecklist = (index: number, changes: Partial<ChecklistItemState>) => {
-    setChecklistStates(s => s.map((x,i) => i===index ? {...x, ...changes} : x));
+  // 4) Helpers
+  const updateChecklist = (i: number, changes: Partial<ChecklistItemState>) => {
+    setChecklistStates(s =>
+      s.map((x, idx) => (idx === i ? { ...x, ...changes } : x))
+    );
   };
 
   const pickImages = async () => {
@@ -154,83 +157,90 @@ export default function AparMaintenance() {
       quality: 0.5,
     });
     if (!result.canceled) {
-      console.debug('[AparMaintenance] picked image:', result.assets[0].uri);
-      setFotoPemeriksaan(prev => [...prev, result.assets[0].uri]);
+      console.debug('[AparMaintenance] picked image', result.assets[0].uri);
+      setFotoUris(prev => [...prev, result.assets[0].uri]);
     }
   };
 
+  // 5) handleSubmit: online-first, enqueue on fail, then flush if online
   const handleSubmit = async () => {
     if (!badgeNumber || !data) {
       Alert.alert('Error','Data tidak lengkap');
       return;
     }
+    // validate checklist
     for (const c of checklistStates) {
-      if (!c.condition || (c.condition==='Tidak Baik' && !c.alasan)) {
+      if (!c.condition || (c.condition === 'Tidak Baik' && !c.alasan)) {
         Alert.alert('Validasi','Lengkapi semua checklist dan alasan jika perlu');
         return;
       }
     }
-    console.log('[AparMaintenance] submitting form');
+
+    console.log('[AparMaintenance] handleSubmit, queueSize=', queueCount);
     setSubmitting(true);
+
+    const formData = new FormData();
+    formData.append('aparId', String(data.id_apar));
+    formData.append('tanggal', new Date().toISOString());
+    formData.append('badgeNumber', badgeNumber);
+    if (data.intervalPetugasId != null) {
+      formData.append('intervalPetugasId', String(data.intervalPetugasId));
+    }
+    formData.append('kondisi', kondisi);
+    formData.append('catatanMasalah', catatanMasalah);
+    formData.append('rekomendasi', rekomendasi);
+    formData.append('tindakLanjut', tindakLanjut);
+    formData.append('tekanan', tekanan);
+    formData.append('jumlahMasalah', jumlahMasalah);
+    formData.append(
+      'checklist',
+      JSON.stringify(
+        checklistStates.map(c => ({
+          checklistId: c.checklistId,
+          condition: c.condition,
+          alasan: c.alasan,
+        }))
+      )
+    );
+    fotoUris.forEach((uri, idx) => {
+      const ext = uri.split('.').pop() || 'jpg';
+      formData.append('fotos', {
+        uri,
+        name: `photo${idx}.${ext}`,
+        type: `image/${ext}`,
+      } as any);
+    });
+
     try {
-      const formData = new FormData();
-      formData.append('aparId', String(data.id_apar));
-      formData.append('tanggal', new Date().toISOString());
-      formData.append('badgeNumber', badgeNumber);
-      if (data.intervalPetugasId != null) {
-        formData.append('intervalPetugasId', String(data.intervalPetugasId));
-      }
-      formData.append('kondisi', kondisi);
-      formData.append('catatanMasalah', catatanMasalah);
-      formData.append('rekomendasi', rekomendasi);
-      formData.append('tindakLanjut', tindakLanjut);
-      formData.append('tekanan', tekanan);
-      formData.append('jumlahMasalah', jumlahMasalah);
-      formData.append('checklist', JSON.stringify(
-        checklistStates.map(c => ({ checklistId: c.checklistId, condition: c.condition, alasan: c.alasan||'' }))
-      ));
-      fotoPemeriksaan.forEach((uri, idx) => {
-        const ext = uri.split('.').pop() || 'jpg';
-        formData.append('fotos', { uri, name: `photo${idx}.${ext}`, type: `image/${ext}` } as any);
-      });
-      const postUrl = `${apiBaseUrl}/api/perawatan/submit`;
-      console.log('[AparMaintenance] POST to', postUrl);
-      const res = await fetch(postUrl, {
-        method: 'POST',
-        body: formData,
-        headers: { 'Content-Type':'multipart/form-data' }
-      });
-      const result = await res.json();
-      if (!res.ok || !result.success) {
-        throw new Error(result.message || `HTTP ${res.status}`);
-      }
-      Alert.alert('Berhasil','Maintenance sudah terkirim.',[
-        { text:'OK', onPress:() => navigation.goBack() }
-      ]);
-    } catch (err: any) {
-      console.error('[AparMaintenance] submit failed:', err);
-      if (/Network request failed/.test(err.message)) {
-        await enqueueRequest({
-          method:'POST', url:`${apiBaseUrl}/api/perawatan/submit`,
-          body:{ aparId:String(data.id_apar), tanggal:new Date().toISOString(), badgeNumber,
-            intervalPetugasId:data.intervalPetugasId, kondisi, catatanMasalah, rekomendasi,
-            tindakLanjut, tekanan, jumlahMasalah,
-            checklist: checklistStates.map(c=>({ checklistId:c.checklistId, condition:c.condition, alasan:c.alasan||'' })),
-            fotos: fotoPemeriksaan.map((uri,idx)=>({ uri, name:`photo${idx}.${uri.split('.').pop()}`, type:`image/${uri.split('.').pop()}` }))
-          },
-          isMultipart:true
-        });
-        Alert.alert('📴 Offline','Data tersimpan lokal, akan dikirim saat online',[
-          { text:'OK', onPress:() => navigation.goBack() }
-        ]);
+      const path = '/api/perawatan/submit';
+      console.log('[AparMaintenance] safeFetchOffline POST', path);
+      const res = await safeFetchOffline(path, { method: 'POST', body: formData });
+      const json = await res.json();
+      console.log('[AparMaintenance] POST response', json);
+
+      if ((json as any).offline) {
+        Alert.alert(
+          '📴 Offline',
+          'Data disimpan sementara dan akan dikirim saat online.',
+          [{ text: 'OK', onPress: () => navigation.goBack() }]
+        );
       } else {
-        Alert.alert('Error','Gagal menyimpan: '+err.message);
+        Alert.alert(
+          '✅ Sukses',
+          'Maintenance berhasil dikirim.',
+          [{ text: 'OK', onPress: () => navigation.goBack() }]
+        );
       }
+      // after submit (online or offline), queue will auto‐flush from NetInfo listener
+    } catch (err: any) {
+      console.error('[AparMaintenance] unexpected error', err);
+      Alert.alert('Error','Terjadi kesalahan: ' + err.message);
     } finally {
       setSubmitting(false);
     }
   };
 
+  // 6) Render
   if (loading) {
     return (
       <Centered>
@@ -250,54 +260,66 @@ export default function AparMaintenance() {
   }
 
   return (
-    <KeyboardAvoidingView behavior={Platform.OS==='ios'?'padding':undefined} style={{ flex:1 }}>
+    <KeyboardAvoidingView
+      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+      style={{ flex: 1 }}
+    >
       <ScrollContainer>
+        {/* -- DETAIL APAR -- */}
         <Card>
           <Label>No APAR:</Label>
           <ReadOnlyInput value={data.no_apar} />
           <Label>Lokasi:</Label>
           <ReadOnlyInput value={data.lokasi_apar} />
-          <Label>Jenis APAR:</Label>
+          <Label>Jenis:</Label>
           <ReadOnlyInput value={data.jenis_apar} />
           <Label>Interval:</Label>
           <ReadOnlyInput value={intervalLabel} />
           <Label>Next Due:</Label>
-          <ReadOnlyInput value={data.nextDueDate ?? '—'} />
+          <ReadOnlyInput value={data.nextDueDate || '—'} />
         </Card>
 
+        {/* -- CHECKLIST -- */}
         <Card>
           <Label>Checklist Pemeriksaan:</Label>
           {checklistStates.map((c, i) => (
             <View key={i} style={{ marginBottom: 16 }}>
               <QuestionText>{c.item}</QuestionText>
               <ButtonRow>
-                <ToggleButton active={c.condition==='Baik'} onPress={()=>updateChecklist(i,{condition:'Baik'})}>
-                  <ToggleText active={c.condition==='Baik'}>Baik</ToggleText>
-                </ToggleButton>
-                <ToggleButton active={c.condition==='Tidak Baik'} onPress={()=>updateChecklist(i,{condition:'Tidak Baik'})}>
-                  <ToggleText active={c.condition==='Tidak Baik'}>Tidak Baik</ToggleText>
-                </ToggleButton>
+                <Toggle active={c.condition === 'Baik'} onPress={() => updateChecklist(i, { condition: 'Baik' })}>
+                  <ToggleText active={c.condition === 'Baik'}>Baik</ToggleText>
+                </Toggle>
+                <Toggle active={c.condition === 'Tidak Baik'} onPress={() => updateChecklist(i, { condition: 'Tidak Baik' })}>
+                  <ToggleText active={c.condition === 'Tidak Baik'}>Tidak Baik</ToggleText>
+                </Toggle>
               </ButtonRow>
-              {c.condition==='Tidak Baik' && (
+              {c.condition === 'Tidak Baik' && (
                 <>
                   <Label>Alasan:</Label>
-                  <Input value={c.alasan} onChangeText={t=>updateChecklist(i,{alasan:t})} placeholder="Jelaskan masalah" multiline />
+                  <Input
+                    value={c.alasan}
+                    onChangeText={t => updateChecklist(i, { alasan: t })}
+                    placeholder="Jelaskan masalah"
+                    multiline
+                  />
                 </>
               )}
             </View>
           ))}
         </Card>
 
+        {/* -- FOTO -- */}
         <Card>
           <Label>Foto Pemeriksaan:</Label>
           <Pressable style={uploadStyle} onPress={pickImages}>
             <Text>Tap untuk pilih foto…</Text>
           </Pressable>
-          {fotoPemeriksaan.map((uri,idx) => (
-            <Image key={idx} source={{uri}} style={{width:100,height:100,marginBottom:8}} />
+          {fotoUris.map((uri, idx) => (
+            <Image key={idx} source={{ uri }} style={{ width: 100, height: 100, marginBottom: 8 }} />
           ))}
         </Card>
 
+        {/* -- FORM TAMBAHAN -- */}
         <Card>
           <Label>Kondisi Umum:</Label>
           <Input value={kondisi} onChangeText={setKondisi} placeholder="Masukkan kondisi umum" />
@@ -313,18 +335,16 @@ export default function AparMaintenance() {
           <Input value={jumlahMasalah} onChangeText={setJumlahMasalah} placeholder="Masukkan jumlah masalah" keyboardType="numeric" />
         </Card>
 
+        {/* -- SUBMIT BUTTON -- */}
         <SubmitButton disabled={submitting} onPress={handleSubmit}>
-          {submitting
-            ? <ActivityIndicator color="#fff" />
-            : <SubmitText>Simpan Maintenance</SubmitText>
-          }
+          {submitting ? <ActivityIndicator color="#fff" /> : <SubmitText>Simpan Maintenance</SubmitText>}
         </SubmitButton>
       </ScrollContainer>
     </KeyboardAvoidingView>
   );
 }
 
-// Styled Components
+// ========== STYLED COMPONENTS ==========
 const Centered = styled(View)`
   flex: 1;
   justify-content: center;
@@ -375,15 +395,15 @@ const ButtonRow = styled(View)`
   margin-bottom: 12px;
   justify-content: space-between;
 `;
-const ToggleButton = styled(Pressable)<{ active: boolean }>`
+const Toggle = styled(Pressable)<{ active: boolean }>`
   flex: 1;
   background-color: ${({ active }) => (active ? '#dc2626' : '#f3f4f6')};
   padding: 12px;
   border-radius: 6px;
   align-items: center;
+  margin-horizontal: 4px;
   border-width: 1px;
   border-color: ${({ active }) => (active ? '#dc2626' : '#d1d5db')};
-  margin-horizontal: 4px;
 `;
 const ToggleText = styled(Text)<{ active: boolean }>`
   color: ${({ active }) => (active ? '#fff' : '#6b7280')};
@@ -403,7 +423,7 @@ const uploadStyle = {
 const SubmitButton = styled(Pressable)<{ disabled?: boolean }>`
   background-color: ${({ disabled }) => (disabled ? '#9ca3af' : '#dc2626')};
   padding: 16px;
-  margin: 20px 16px 0px;
+  margin: 20px 16px 0;
   border-radius: 8px;
   align-items: center;
 `;

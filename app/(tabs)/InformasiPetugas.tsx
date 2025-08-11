@@ -237,7 +237,7 @@ export default function InformasiAlat() {
                 <StatLeft>
                   <IconSymbol name="clock.fill" size={28} color="#fff" />
                   <StatInfo>
-                    <StatTitle>Perlu Maintenance</StatTitle>
+                    <StatTitle>Perlu Inspeksi</StatTitle>
                     <StatSubtitle>
                       Bulan {new Date().toLocaleDateString('id-ID', { month: 'long' })}
                     </StatSubtitle>
@@ -252,7 +252,7 @@ export default function InformasiAlat() {
                 <StatLeft>
                   <IconSymbol name="checkmark.circle.fill" size={28} color="#fff" />
                   <StatInfo>
-                    <StatTitle>Sudah Maintenance</StatTitle>
+                    <StatTitle>Sudah dilakukan Inspeksi</StatTitle>
                     <StatSubtitle>
                       Bulan {new Date().toLocaleDateString('id-ID', { month: 'long' })}
                     </StatSubtitle>

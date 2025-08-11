@@ -280,7 +280,7 @@ export default function AparInformasi() {
         </FloatingBtn>
       )}
 
-      {__DEV__ && (
+      {/* {__DEV__ && (
         <DebugWrap>
           <DebugTitle>Preload: {preloadStatus}</DebugTitle>
           <DebugLine>List: {preloadSummary.listCount}</DebugLine>
@@ -297,7 +297,7 @@ export default function AparInformasi() {
           <DebugLine>Queue: {count} | Flushing: {isFlushing ? 'ya' : 'tidak'}</DebugLine>
           <DebugLine>Force CTA: {forceShowFlushCta ? 'ya' : 'tidak'}</DebugLine>
         </DebugWrap>
-      )}
+      )} */}
     </Container>
   );
 }

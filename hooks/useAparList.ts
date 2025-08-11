@@ -1,10 +1,14 @@
 // hooks/useAparList.ts
 import { useBadge } from '@/context/BadgeContext';
+import { baseUrl } from '@/src/config';
 import { safeFetchOffline } from '@/utils/ManajemenOffline';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import NetInfo from '@react-native-community/netinfo';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Alert } from 'react-native';
-import { baseUrl } from '@/src/config';
+
+// TTL helper untuk detail cache
+import { purgeStaleDetails, touchDetailKey } from '../src/cacheTTL';
 
 export type MaintenanceStatus = 'Belum' | 'Sudah';
 export type OfflineReason = 'network' | 'server-5xx' | null;
@@ -12,13 +16,124 @@ export type OfflineReason = 'network' | 'server-5xx' | null;
 export interface AparRaw { /* …sesuaikan field… */ }
 export interface APAR extends AparRaw { daysRemaining: number; }
 
+const CONCURRENCY = 3; // aman buat device mid/low
+
+const PRELOAD_FLAG_PREFIX = 'PRELOAD_FULL_FOR_';
+
 export function useAparList() {
   const { badgeNumber, clearBadgeNumber } = useBadge();
   const [loading, setLoading] = useState(true);
   const [rawData, setRawData] = useState<AparRaw[]>([]);
   const [offlineReason, setOfflineReason] = useState<OfflineReason>(null);
 
+  const preloadingRef = useRef(false);
+
   useEffect(() => { setOfflineReason(null); }, [badgeNumber]);
+
+  // bersihkan cache detail yang sudah lama (sekali saat hook hidup)
+  useEffect(() => {
+    (async () => {
+      try {
+        const removed = await purgeStaleDetails(); // default 30 hari
+        if (__DEV__ && removed) console.log('[TTL] removed old detail:', removed);
+      } catch (e) {
+        if (__DEV__) console.warn('[TTL] purge error', e);
+      }
+    })();
+  }, []);
+
+  const saveDetailToCache = async (detail: any, id: string, token?: string | null) => {
+    if (!detail || typeof detail !== 'object') return;
+    if (detail.id_apar == null) detail.id_apar = Number(id);
+
+    const idKey = `APAR_DETAIL_id=${encodeURIComponent(id)}`;
+    await AsyncStorage.setItem(idKey, JSON.stringify(detail));
+    await touchDetailKey(idKey);
+
+    if (token) {
+      const tkKey = `APAR_DETAIL_token=${encodeURIComponent(token)}`;
+      await AsyncStorage.setItem(tkKey, JSON.stringify(detail));
+      await touchDetailKey(tkKey);
+    }
+  };
+
+  const fetchTokenForId = async (id: string): Promise<string | null> => {
+    try {
+      const res = await safeFetchOffline(`${baseUrl}/api/peralatan/admin/${encodeURIComponent(id)}`, { method: 'GET' });
+      const text = await res.text();
+      const json = text ? JSON.parse(text) : null;
+      if (!res.ok || (json && json.offline)) return null;
+      const token = json?.TokenQR || json?.tokenQR || json?.token || null;
+      if (!token || String(token).trim() === '') return null;
+      return String(token).trim();
+    } catch {
+      return null;
+    }
+  };
+
+  const fetchDetailByToken = async (token: string, badge: string): Promise<any | null> => {
+    try {
+      const url = `${baseUrl}/api/perawatan/with-checklist/by-token?token=${encodeURIComponent(token)}&badge=${encodeURIComponent(badge)}`;
+      const res = await safeFetchOffline(url, { method: 'GET' });
+      const text = await res.text();
+      const json = text ? JSON.parse(text) : null;
+      if ((json && json.offline) || !res.ok) return null;
+      if (!json || typeof json !== 'object' || json.id_apar == null) return null;
+      return json;
+    } catch {
+      return null;
+    }
+  };
+
+  const fetchDetailById = async (id: string, badge: string): Promise<any | null> => {
+    try {
+      const url = `${baseUrl}/api/peralatan/with-checklist?id=${encodeURIComponent(id)}&badge=${encodeURIComponent(badge)}`;
+      const res = await safeFetchOffline(url, { method: 'GET' });
+      const text = await res.text();
+      const json = text ? JSON.parse(text) : null;
+      if ((json && json.offline) || !res.ok) return null;
+      if (!json || typeof json !== 'object' || json.id_apar == null) return null;
+      return json;
+    } catch {
+      return null;
+    }
+  };
+
+  const preloadAllDetailsForBadge = useCallback(async (ids: string[], badge: string) => {
+    if (!ids.length || !badge) return;
+    if (preloadingRef.current) return;
+
+    const flagKey = `${PRELOAD_FLAG_PREFIX}${badge}`;
+    const already = await AsyncStorage.getItem(flagKey);
+    if (already) return;
+
+    preloadingRef.current = true;
+    try {
+      const queue = [...ids];
+      const worker = async () => {
+        while (queue.length) {
+          const net = await NetInfo.fetch();
+          if (!net.isConnected) { queue.length = 0; break; }
+
+          const id = queue.shift()!;
+          const token = await fetchTokenForId(id);
+
+          let detail: any | null = null;
+          if (token) detail = await fetchDetailByToken(token, badge);
+          if (!detail) detail = await fetchDetailById(id, badge);
+
+          if (detail) {
+            await saveDetailToCache(detail, id, token ?? undefined);
+          }
+        }
+      };
+
+      await Promise.all(Array.from({ length: CONCURRENCY }, () => worker()));
+      await AsyncStorage.setItem(flagKey, new Date().toISOString());
+    } finally {
+      preloadingRef.current = false;
+    }
+  }, []);
 
   const fetchData = useCallback(async () => {
     if (!badgeNumber) {
@@ -33,7 +148,6 @@ export function useAparList() {
         { method: 'GET' }
       );
 
-      // coba parse json untuk deteksi offline flag
       try {
         const json = await res.json();
         if ((json as any)?.offline) {
@@ -51,7 +165,6 @@ export function useAparList() {
           return;
         }
 
-        // respons normal (bukan offline)
         setOfflineReason(null);
 
         if (res.status === 400 || res.status === 404) {
@@ -68,7 +181,7 @@ export function useAparList() {
           no_apar: d.no_apar,
           lokasi_apar: d.lokasi_apar,
           jenis_apar: d.jenis_apar,
-          statusMaintenance: d.last_inspection ? 'Sudah' : 'Belum',
+          statusMaintenance: d.last_inspection ? 'Sudah' as MaintenanceStatus : 'Belum' as MaintenanceStatus,
           interval_maintenance: (d.kuota_per_bulan ?? 1) * 30,
           nextDueDate: d.next_due_date ?? '',
           last_inspection: d.last_inspection ?? undefined,
@@ -78,8 +191,11 @@ export function useAparList() {
 
         setRawData(mapped);
         await AsyncStorage.setItem('APAR_CACHE', JSON.stringify(mapped));
+
+        // PRELOAD semua detail → supaya scan QR offline tetap jalan
+        const ids = (data || []).map((d: any) => d.id_apar).filter((v: any) => v != null).map((v: any) => String(v));
+        preloadAllDetailsForBadge(ids, badgeNumber).catch(() => {});
       } catch (parseErr) {
-        // fallback ke cache jika parsing gagal
         const cached = await AsyncStorage.getItem('APAR_CACHE');
         if (cached) {
           setRawData(JSON.parse(cached));
@@ -90,7 +206,6 @@ export function useAparList() {
         }
       }
     } catch (e: any) {
-      // error tak terduga → fallback cache
       const cached = await AsyncStorage.getItem('APAR_CACHE');
       if (cached) {
         setRawData(JSON.parse(cached));
@@ -100,7 +215,7 @@ export function useAparList() {
         setRawData([]);
       }
     }
-  }, [badgeNumber, clearBadgeNumber, offlineReason]);
+  }, [badgeNumber, clearBadgeNumber, offlineReason, preloadAllDetailsForBadge]);
 
   useEffect(() => {
     setLoading(true);

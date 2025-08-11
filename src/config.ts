@@ -2,11 +2,11 @@
 import Constants from 'expo-constants';
 import { Platform } from 'react-native';
 
-// 1. Baca channel (development, staging, production)
+// 1. Baca manifest (fallback untuk SDK baru)
 const manifest = Constants.manifest || (Constants as any).expoConfig || {};
-const channel  = (manifest.releaseChannel as string) || 'development';
+const channel = (manifest.releaseChannel as string) || 'development';
 
-// 2. Ambil URL dari app.json → extra
+// 2. Ambil extra URLs dari app.json
 interface Extra {
   devApiUrl:  string;
   stagApiUrl: string;
@@ -16,16 +16,22 @@ const extra = (manifest.extra || {}) as Extra;
 
 // 3. Pilih rawUrl berdasarkan channel
 let rawUrl = extra.devApiUrl;
-if (channel === 'staging')   rawUrl = extra.stagApiUrl;
-if (channel === 'production' && extra.prodApiUrl) rawUrl = extra.prodApiUrl;
+if (channel === 'staging') {
+  rawUrl = extra.stagApiUrl;
+} else if (channel === 'production' && extra.prodApiUrl) {
+  rawUrl = extra.prodApiUrl;
+}
 
-// 4. Ubah hostname untuk Android emulator
-//    - Android emulator: localhost → 10.0.2.2
-//    - iOS simulator / real device tetap pakai hostname asli
+// 4. OVERRIDE CEPAT langsung ke Android emulator IP
+//    uncomment baris di bawah ini untuk paksa pakai 10.0.2.2:3000
+rawUrl = 'http://10.0.2.2:3000';
+
+// 5. Ubah hostname untuk Android emulator (tetap 10.0.2.2) atau pakai hostname asli
 const u = new URL(rawUrl);
-const hostname = Platform.OS === 'android' && channel === 'development'
-  ? '10.0.2.2'
-  : u.hostname;
+const hostname =
+  Platform.OS === 'android' && channel === 'development'
+    ? '10.0.2.2'
+    : u.hostname;
 
-// 5. Rekonstruksi baseUrl dengan port dan protocol
+// 6. Rekonstruksi baseUrl lengkap dengan port
 export const baseUrl = `${u.protocol}//${hostname}:${u.port}`;

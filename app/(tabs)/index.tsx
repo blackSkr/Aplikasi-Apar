@@ -1,4 +1,5 @@
 // app/(tabs)/index.tsx
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import NetInfo from '@react-native-community/netinfo';
 import { useFocusEffect } from '@react-navigation/native';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -28,7 +29,7 @@ const FORCE_CTA_MS = 12000;
 
 export default function AparInformasi() {
   const { loading, list, refresh, offlineReason } = useAparList();
-  const { clearBadgeNumber } = useBadge();
+  const { badgeNumber, clearBadgeNumber } = useBadge(); // ⬅️ ambil badgeNumber juga
 
   // flush manual
   const { count, isFlushing, refreshQueue, flushNow } = useOfflineQueue({
@@ -141,7 +142,14 @@ export default function AparInformasi() {
     }
   }, [preloadStatus]);
 
-  const handleLogout = async () => { await clearBadgeNumber(); };
+  // ⬇️ bersihkan preload flag pada logout, supaya login berikutnya preload lagi
+  const handleLogout = async () => {
+    if (badgeNumber) {
+      const flagKey = `PRELOAD_FULL_FOR_${badgeNumber}`;
+      await AsyncStorage.removeItem(flagKey);
+    }
+    await clearBadgeNumber();
+  };
 
   // filter data sesuai jenis
   const needAll = useMemo(
@@ -207,7 +215,6 @@ export default function AparInformasi() {
 
   return (
     <Container key={relogKey}>
-      {/* KIRIM selectedJenis ke Header agar judul menampilkan jenis terpilih */}
       <Header onLogout={handleLogout} selectedJenis={selectedJenis} />
 
       {!isConnected && (
@@ -258,7 +265,6 @@ export default function AparInformasi() {
         stickySectionHeadersEnabled={false}
       />
 
-      {/* Tombol kirim — manual */}
       {isConnected && (count > 0 || isFlushing || forceShowFlushCta) && (
         <FloatingBtn
           onPress={() => {

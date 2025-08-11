@@ -68,40 +68,30 @@ export default function AparMaintenance() {
   const [tekanan, setTekanan] = useState('');
   const [jumlahMasalah, setJumlahMasalah] = useState('');
 
-  // 1) Auto‐flush queue whenever connection is regained
   useEffect(() => {
     const unsub = NetInfo.addEventListener(async state => {
-      console.log('[AparMaintenance] NetInfo:', state.isConnected);
       if (state.isConnected) {
-        console.log('[AparMaintenance] Now online → flushing queue');
         const remaining = await flushQueue();
-        console.log('[AparMaintenance] flushQueue remaining:', remaining);
         await refreshQueue();
       }
     });
     return () => unsub();
   }, [refreshQueue]);
 
-  // 2) Initialize form & checklist states
   const initApar = (apar: AparData) => {
-    console.debug('[AparMaintenance] initApar', apar);
     setData(apar);
-
-    // parse checklist array
     let arr: any[] = [];
     if (typeof apar.keperluan_check === 'string') {
       try { arr = JSON.parse(apar.keperluan_check); } catch { arr = []; }
     } else if (Array.isArray(apar.keperluan_check)) {
       arr = apar.keperluan_check;
     }
-
     setChecklistStates(arr.map(o => ({
       checklistId: o.checklistId ?? o.Id,
       item: o.question || o.Pertanyaan || '(no question)',
       condition: null,
       alasan: '',
     })));
-
     if (apar.namaIntervalPetugas && apar.bulanIntervalPetugas) {
       setIntervalLabel(`${apar.namaIntervalPetugas} (${apar.bulanIntervalPetugas} bulan)`);
     } else {
@@ -109,7 +99,6 @@ export default function AparMaintenance() {
     }
   };
 
-  // 3) Fetch detail with safeFetchOffline + cache fallback
   useEffect(() => {
     (async () => {
       if (!keyParam) {
@@ -119,24 +108,35 @@ export default function AparMaintenance() {
       }
       setLoading(true);
 
-      const path = `/api/peralatan/with-checklist?${keyParam}&badge=${encodeURIComponent(badgeNumber||'')}`;
-      console.log('[AparMaintenance] safeFetchOffline GET', path);
+      const isToken = keyParam.startsWith('token=');
+      const path = isToken
+        ? `/api/perawatan/with-checklist/by-token?${keyParam}&badge=${encodeURIComponent(badgeNumber||'')}`
+        : `/api/peralatan/with-checklist?${keyParam}&badge=${encodeURIComponent(badgeNumber||'')}`;
 
       try {
         const res = await safeFetchOffline(path, { method: 'GET' });
-        const json = await res.json();
-        console.log('[AparMaintenance] GET response', json);
-        if ((json as any).offline) throw new Error('Offline fallback');
+        const text = await res.text();
+        let json: any = null;
+        try { json = text ? JSON.parse(text) : null; } catch {}
+
+        if (json && json.offline) throw new Error('Offline fallback');
+        if (!res.ok) {
+          const msg = (json && json.message) ? json.message : `HTTP ${res.status}`;
+          throw new Error(msg);
+        }
+        if (!json || typeof json !== 'object' || json.id_apar == null) {
+          throw new Error('Data tidak valid dari server');
+        }
+
         initApar(json as AparData);
         await AsyncStorage.setItem(`APAR_DETAIL_${keyParam}`, JSON.stringify(json));
       } catch (err: any) {
-        console.warn('[AparMaintenance] fetch failed:', err.message);
         const cached = await AsyncStorage.getItem(`APAR_DETAIL_${keyParam}`);
         if (cached) {
           initApar(JSON.parse(cached));
-          Alert.alert('Offline Mode', 'Menampilkan data dari cache.');
+          Alert.alert('Offline/Cache', 'Menampilkan data dari cache.');
         } else {
-          Alert.alert('Error', 'Gagal mengambil data: ' + err.message);
+          Alert.alert('Error', 'Gagal mengambil data: ' + (err?.message || 'Tidak diketahui'));
         }
       } finally {
         setLoading(false);
@@ -144,7 +144,6 @@ export default function AparMaintenance() {
     })();
   }, [badgeNumber, keyParam]);
 
-  // 4) Helpers
   const updateChecklist = (i: number, changes: Partial<ChecklistItemState>) => {
     setChecklistStates(s =>
       s.map((x, idx) => (idx === i ? { ...x, ...changes } : x))
@@ -157,18 +156,15 @@ export default function AparMaintenance() {
       quality: 0.5,
     });
     if (!result.canceled) {
-      console.debug('[AparMaintenance] picked image', result.assets[0].uri);
       setFotoUris(prev => [...prev, result.assets[0].uri]);
     }
   };
 
-  // 5) handleSubmit: online-first, enqueue on fail, then flush if online
   const handleSubmit = async () => {
     if (!badgeNumber || !data) {
       Alert.alert('Error','Data tidak lengkap');
       return;
     }
-    // validate checklist
     for (const c of checklistStates) {
       if (!c.condition || (c.condition === 'Tidak Baik' && !c.alasan)) {
         Alert.alert('Validasi','Lengkapi semua checklist dan alasan jika perlu');
@@ -176,9 +172,7 @@ export default function AparMaintenance() {
       }
     }
 
-    console.log('[AparMaintenance] handleSubmit, queueSize=', queueCount);
     setSubmitting(true);
-
     const formData = new FormData();
     formData.append('aparId', String(data.id_apar));
     formData.append('tanggal', new Date().toISOString());
@@ -213,34 +207,25 @@ export default function AparMaintenance() {
 
     try {
       const path = '/api/perawatan/submit';
-      console.log('[AparMaintenance] safeFetchOffline POST', path);
       const res = await safeFetchOffline(path, { method: 'POST', body: formData });
       const json = await res.json();
-      console.log('[AparMaintenance] POST response', json);
 
       if ((json as any).offline) {
-        Alert.alert(
-          '📴 Offline',
-          'Data disimpan sementara dan akan dikirim saat online.',
-          [{ text: 'OK', onPress: () => navigation.goBack() }]
-        );
+        Alert.alert('📴 Offline', 'Data disimpan sementara dan akan dikirim saat online.', [
+          { text: 'OK', onPress: () => navigation.goBack() },
+        ]);
       } else {
-        Alert.alert(
-          '✅ Sukses',
-          'Maintenance berhasil dikirim.',
-          [{ text: 'OK', onPress: () => navigation.goBack() }]
-        );
+        Alert.alert('✅ Sukses', 'Maintenance berhasil dikirim.', [
+          { text: 'OK', onPress: () => navigation.goBack() },
+        ]);
       }
-      // after submit (online or offline), queue will auto‐flush from NetInfo listener
     } catch (err: any) {
-      console.error('[AparMaintenance] unexpected error', err);
       Alert.alert('Error','Terjadi kesalahan: ' + err.message);
     } finally {
       setSubmitting(false);
     }
   };
 
-  // 6) Render
   if (loading) {
     return (
       <Centered>
@@ -265,7 +250,6 @@ export default function AparMaintenance() {
       style={{ flex: 1 }}
     >
       <ScrollContainer>
-        {/* -- DETAIL APAR -- */}
         <Card>
           <Label>No APAR:</Label>
           <ReadOnlyInput value={data.no_apar} />
@@ -279,7 +263,6 @@ export default function AparMaintenance() {
           <ReadOnlyInput value={data.nextDueDate || '—'} />
         </Card>
 
-        {/* -- CHECKLIST -- */}
         <Card>
           <Label>Checklist Pemeriksaan:</Label>
           {checklistStates.map((c, i) => (
@@ -308,7 +291,6 @@ export default function AparMaintenance() {
           ))}
         </Card>
 
-        {/* -- FOTO -- */}
         <Card>
           <Label>Foto Pemeriksaan:</Label>
           <Pressable style={uploadStyle} onPress={pickImages}>
@@ -319,7 +301,6 @@ export default function AparMaintenance() {
           ))}
         </Card>
 
-        {/* -- FORM TAMBAHAN -- */}
         <Card>
           <Label>Kondisi Umum:</Label>
           <Input value={kondisi} onChangeText={setKondisi} placeholder="Masukkan kondisi umum" />
@@ -335,7 +316,6 @@ export default function AparMaintenance() {
           <Input value={jumlahMasalah} onChangeText={setJumlahMasalah} placeholder="Masukkan jumlah masalah" keyboardType="numeric" />
         </Card>
 
-        {/* -- SUBMIT BUTTON -- */}
         <SubmitButton disabled={submitting} onPress={handleSubmit}>
           {submitting ? <ActivityIndicator color="#fff" /> : <SubmitText>Simpan Maintenance</SubmitText>}
         </SubmitButton>
@@ -344,91 +324,17 @@ export default function AparMaintenance() {
   );
 }
 
-// ========== STYLED COMPONENTS ==========
-const Centered = styled(View)`
-  flex: 1;
-  justify-content: center;
-  align-items: center;
-  padding: 20px;
-`;
-const ScrollContainer = styled(ScrollView)`
-  flex: 1;
-  background-color: #f9fafb;
-`;
-const Card = styled(View)`
-  background: #fff;
-  margin: 12px 16px;
-  padding: 16px;
-  border-radius: 8px;
-  elevation: 2;
-`;
-const Label = styled(Text)`
-  font-size: 14px;
-  font-weight: 600;
-  color: #374151;
-  margin-bottom: 8px;
-  margin-top: 4px;
-`;
-const ReadOnlyInput = styled(TextInput).attrs({ editable: false })`
-  background: #f3f4f6;
-  padding: 12px;
-  border-radius: 6px;
-  margin-bottom: 12px;
-  color: #6b7280;
-  font-size: 14px;
-`;
-const Input = styled(TextInput)`
-  background: #fff;
-  border: 1px solid #d1d5db;
-  padding: 12px;
-  border-radius: 6px;
-  margin-bottom: 12px;
-`;
-const QuestionText = styled(Text)`
-  font-size: 15px;
-  font-weight: 500;
-  color: #374151;
-  margin-bottom: 8px;
-`;
-const ButtonRow = styled(View)`
-  flex-direction: row;
-  margin-bottom: 12px;
-  justify-content: space-between;
-`;
-const Toggle = styled(Pressable)<{ active: boolean }>`
-  flex: 1;
-  background-color: ${({ active }) => (active ? '#dc2626' : '#f3f4f6')};
-  padding: 12px;
-  border-radius: 6px;
-  align-items: center;
-  margin-horizontal: 4px;
-  border-width: 1px;
-  border-color: ${({ active }) => (active ? '#dc2626' : '#d1d5db')};
-`;
-const ToggleText = styled(Text)<{ active: boolean }>`
-  color: ${({ active }) => (active ? '#fff' : '#6b7280')};
-  font-weight: 600;
-  font-size: 14px;
-`;
-const uploadStyle = {
-  backgroundColor: '#f3f4f6',
-  padding: 16,
-  borderRadius: 6,
-  alignItems: 'center',
-  marginBottom: 12,
-  borderWidth: 2,
-  borderColor: '#d1d5db',
-  borderStyle: 'dashed',
-};
-const SubmitButton = styled(Pressable)<{ disabled?: boolean }>`
-  background-color: ${({ disabled }) => (disabled ? '#9ca3af' : '#dc2626')};
-  padding: 16px;
-  margin: 20px 16px 0;
-  border-radius: 8px;
-  align-items: center;
-`;
-const SubmitText = styled(Text)`
-  color: #fff;
-  font-size: 16px;
-  font-weight: bold;
-`;
+// ========== STYLED ==========
+const Centered = styled(View)` flex: 1; justify-content: center; align-items: center; padding: 20px; `;
+const ScrollContainer = styled(ScrollView)` flex: 1; background-color: #f9fafb; `;
+const Card = styled(View)` background: #fff; margin: 12px 16px; padding: 16px; border-radius: 8px; elevation: 2; `;
+const Label = styled(Text)` font-size: 14px; font-weight: 600; color: #374151; margin-bottom: 8px; margin-top: 4px; `;
+const ReadOnlyInput = styled(TextInput).attrs({ editable: false })` background: #f3f4f6; padding: 12px; border-radius: 6px; margin-bottom: 12px; color: #6b7280; font-size: 14px; `;
+const Input = styled(TextInput)` background: #fff; border: 1px solid #d1d5db; padding: 12px; border-radius: 6px; margin-bottom: 12px; `;
+const QuestionText = styled(Text)` font-size: 15px; font-weight: 500; color: #374151; margin-bottom: 8px; `;
+const ButtonRow = styled(View)` flex-direction: row; margin-bottom: 12px; justify-content: space-between; `;
+const Toggle = styled(Pressable)<{ active: boolean }>` flex: 1; background-color: ${({ active }) => (active ? '#dc2626' : '#f3f4f6')}; padding: 12px; border-radius: 6px; align-items: center; margin-horizontal: 4px; border-width: 1px; border-color: ${({ active }) => (active ? '#dc2626' : '#d1d5db')}; `;
+const ToggleText = styled(Text)<{ active: boolean }>` color: ${({ active }) => (active ? '#fff' : '#6b7280')}; font-weight: 600; font-size: 14px; `;
+const uploadStyle = { backgroundColor: '#f3f4f6', padding: 16, borderRadius: 6, alignItems: 'center', marginBottom: 12, borderWidth: 2, borderColor: '#d1d5db', borderStyle: 'dashed', } as const;
+const SubmitButton = styled(Pressable)<{ disabled?: boolean }>` background-color: ${({ disabled }) => (disabled ? '#9ca3af' : '#dc2626')}; padding: 16px; margin: 20px 16px 0; border-radius: 8px; align-items: center; `;
+const SubmitText = styled(Text)` color: #fff; font-size: 16px; font-weight: bold; `;

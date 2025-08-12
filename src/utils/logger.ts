@@ -1,7 +1,5 @@
 // src/utils/logger.ts
 type Level = 'debug' | 'info' | 'warn' | 'error';
-
-// toggle global kalau mau matikan log cepat
 const ENABLED = true;
 
 export function createLogger(ns: string) {

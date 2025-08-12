@@ -29,13 +29,12 @@ import { __CONFIG_DEBUG__, baseUrl, logApiConfig } from '@/src/config';
 import { installFetchLogger } from '@/src/setupNetworking';
 import { createLogger } from '@/src/utils/logger';
 
-installFetchLogger(); // dipasang sekali (ada guard di dalamnya)
+installFetchLogger();
 const log = createLogger('home');
 
 const INITIAL_COUNT = 3;
 const FORCE_CTA_MS = 12000;
 
-// probe sederhana dengan timeout, supaya kelihatan URL yang ditembak
 async function debugPing(tag: string) {
   const url = `${baseUrl}/api/peralatan?badge=PING`;
   log.debug(`[${tag}] baseUrl = ${baseUrl}`);
@@ -59,7 +58,6 @@ export default function AparInformasi() {
   const { loading, list, refresh, offlineReason } = useAparList();
   const { badgeNumber, clearBadgeNumber } = useBadge();
 
-  // flush manual
   const { count, isFlushing, refreshQueue, flushNow } = useOfflineQueue({
     autoFlushOnReconnect: false,
     autoFlushOnForeground: false,
@@ -74,7 +72,6 @@ export default function AparInformasi() {
   const [relogKey, setRelogKey] = useState(0);
   const [forceShowFlushCta, setForceShowFlushCta] = useState(false);
 
-  // --- DEBUG saat mount: cetak baseUrl + ping ---
   useEffect(() => {
     (async () => {
       logApiConfig('boot');
@@ -86,7 +83,6 @@ export default function AparInformasi() {
     })();
   }, []);
 
-  // keep stable refs
   const refreshQueueRef = useRef(refreshQueue);
   useEffect(() => { refreshQueueRef.current = refreshQueue; }, [refreshQueue]);
 
@@ -106,26 +102,22 @@ export default function AparInformasi() {
   const forceTimerRef = useRef<NodeJS.Timeout | null>(null);
   const lastIsConnectedRef = useRef<boolean | null>(null);
 
-  // daftar jenis unik
   const jenisList = useMemo(
     () => Array.from(new Set(list.map(i => i.jenis_apar).filter(Boolean))),
     [list]
   );
 
-  // kalau filter tidak ada lagi di list → reset
   useEffect(() => {
     if (selectedJenis && !jenisList.includes(selectedJenis)) {
       setSelectedJenis(null);
     }
   }, [jenisList, selectedJenis]);
 
-  // reset pagination tiap filter/list berubah
   useEffect(() => {
     setVisibleNeed(INITIAL_COUNT);
     setVisibleDone(INITIAL_COUNT);
   }, [selectedJenis, list]);
 
-  // NetInfo listener + DEBUG saat berubah online
   useEffect(() => {
     const unsub = NetInfo.addEventListener(async s => {
       const connected = !!s.isConnected;
@@ -142,7 +134,7 @@ export default function AparInformasi() {
         );
         await debugPing('net-change-online');
 
-        setRelogKey(k => k + 1); // soft remount
+        setRelogKey(k => k + 1);
         setForceShowFlushCta(true);
         if (forceTimerRef.current) clearTimeout(forceTimerRef.current);
         forceTimerRef.current = setTimeout(() => setForceShowFlushCta(false), FORCE_CTA_MS);
@@ -162,7 +154,6 @@ export default function AparInformasi() {
     };
   }, []);
 
-  // sembunyikan CTA jika queue kosong
   useEffect(() => {
     if (forceShowFlushCta && count === 0 && !isFlushing) {
       setForceShowFlushCta(false);
@@ -173,21 +164,18 @@ export default function AparInformasi() {
     }
   }, [forceShowFlushCta, count, isFlushing]);
 
-  // refresh saat focus
   useFocusEffect(
     useCallback(() => {
       refreshSafeRef.current();
     }, [])
   );
 
-  // setelah preload selesai → refresh sekali
   useEffect(() => {
     if (preloadStatus === 'done' || preloadStatus === 'skipped' || preloadStatus === 'error') {
       refreshSafeRef.current();
     }
   }, [preloadStatus]);
 
-  // bersihkan preload flag pada logout, supaya login berikutnya preload lagi
   const handleLogout = async () => {
     if (badgeNumber) {
       const flagKey = `PRELOAD_FULL_FOR_${badgeNumber}`;
@@ -196,7 +184,6 @@ export default function AparInformasi() {
     await clearBadgeNumber();
   };
 
-  // filter data sesuai jenis
   const needAll = useMemo(
     () => list
       .filter(i => i.statusMaintenance === 'Belum')
@@ -345,7 +332,7 @@ export default function AparInformasi() {
   );
 }
 
-// =================== STYLED COMPONENTS ===================
+// === styled ===
 const Container = styled.View` flex: 1; background: #f5f5f5; `;
 const LoadingText = styled(Text)` margin-top: 12px; color: ${Colors.text}; font-size: 16px; `;
 const OfflineBanner = styled(View)` padding: 10px; align-items: center; background: #fff3cd; `;

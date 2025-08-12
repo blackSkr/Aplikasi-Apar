@@ -15,12 +15,8 @@ const warn = (...a: any[]) => { if (__DEV__) console.warn('[Offline]', ...a); };
 
 async function readQueue(): Promise<PendingRequest[]> {
   const raw = (await AsyncStorage.getItem(QUEUE_KEY)) || '[]';
-  try {
-    const arr = JSON.parse(raw);
-    return Array.isArray(arr) ? arr : [];
-  } catch {
-    return [];
-  }
+  try { const arr = JSON.parse(raw); return Array.isArray(arr) ? arr : []; }
+  catch { return []; }
 }
 
 async function writeQueue(q: PendingRequest[]) {
@@ -37,9 +33,8 @@ async function enqueueRequest(req: PendingRequest) {
 
 export async function getQueueCount(): Promise<number> {
   const q = await readQueue();
-  const len = q.length;
-  console.log('[Debug][OfflineQueue] getQueueCount =', len);
-  return len;
+  console.log('[Debug][OfflineQueue] getQueueCount =', q.length);
+  return q.length;
 }
 
 function toUrl(pathOrUrl: string) {
@@ -50,7 +45,6 @@ function toUrl(pathOrUrl: string) {
 function offlineResponse(
   reason: 'network' | 'server-5xx' = 'network'
 ): Response & { offline?: boolean; reason?: string } {
-  // Catatan: flag offline & reason ada di BODY JSON. Status HTTP dibuat 200 agar caller bisa .json() tanpa throw.
   return new Response(JSON.stringify({ offline: true, reason }), {
     status: 200,
     headers: { 'Content-Type': 'application/json' },
@@ -60,8 +54,8 @@ function offlineResponse(
 /**
  * safeFetchOffline
  * - GET:
- *    - Sukses atau error status (2xx/3xx/4xx/5xx) → return response asli (TIDAK disamarkan jadi offline)
- *    - Network error (timeout/DNS) → return { offline:true, reason:'network' }
+ *    - return response asli (2xx/3xx/4xx/5xx) → caller yang bedakan
+ *    - network error → { offline:true, reason:'network' }
  * - POST/PUT/DELETE:
  *    - network error → enqueue + { offline:true, reason:'network' }
  *    - 5xx           → enqueue + { offline:true, reason:'server-5xx' }
@@ -76,22 +70,20 @@ export async function safeFetchOffline(
 
   console.log(`[Debug][safeFetchOffline] → ${method} ${url}`);
 
-  // ==== GET: jangan samarkan 5xx jadi offline. Hanya network error yang dianggap offline. ====
   if (method === 'GET') {
     try {
       const res = await fetch(url, options);
       console.log('[Debug][safeFetchOffline][GET] status', res.status);
-      return res as any; // biarkan caller bedakan 2xx/4xx/5xx
+      return res as any; // biarkan caller bedakan statusnya
     } catch (err) {
       console.warn('[Debug][safeFetchOffline][GET] network error → offline', err);
       return offlineResponse('network');
     }
   }
 
-  // ==== Non-GET: antre saat offline/5xx ====
   const extractBodyParts = (): Array<[string, any]> => {
     const b: any = (options as any).body;
-    if (b && Array.isArray(b?._parts)) return b._parts as Array<[string, any]>; // RN FormData
+    if (b && Array.isArray(b?._parts)) return b._parts as Array<[string, any]>;
     if (b && typeof b === 'object')   return Object.entries(b) as Array<[string, any]>;
     if (typeof b === 'string')        return [['__raw', b]];
     return [];
@@ -117,13 +109,6 @@ export async function safeFetchOffline(
   }
 }
 
-/**
- * flushQueue
- * - Kirim item satu-satu (FIFO)
- * - Rebuild FormData dari bodyParts (support file { uri, name, type })
- * - Success (2xx) → remove dari queue
- * - Non-ok / Network error → tahan (akan dicoba lagi)
- */
 export async function flushQueue(): Promise<number> {
   let queue = await readQueue();
   console.log('[Debug][flushQueue] start, queue size =', queue.length);
@@ -143,8 +128,8 @@ export async function flushQueue(): Promise<number> {
     }
 
     const url = toUrl(req.path);
-
     const formData = new FormData();
+
     if (Array.isArray(req.bodyParts)) {
       for (const [k, v] of req.bodyParts) {
         const preview =
@@ -177,7 +162,7 @@ export async function flushQueue(): Promise<number> {
       const res = await fetch(url, {
         method,
         body: formData,
-        headers: { Accept: 'application/json' }, // Content-Type otomatis oleh RN
+        headers: { Accept: 'application/json' },
       });
       console.log('[Debug][flushQueue] response', res.status);
 
@@ -198,4 +183,3 @@ export async function flushQueue(): Promise<number> {
   await writeQueue(remaining);
   return remaining.length;
 }
-// (auto-flush dikendalikan oleh hook/useOfflineQueue)

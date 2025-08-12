@@ -1,8 +1,7 @@
 // src/setupNetworking.ts
-import { createLogger } from './utils/Logger';
+import { createLogger } from './utils/logger';
 const netlog = createLogger('net');
 
-// Pasang sekali saja
 export function installFetchLogger() {
   const g: any = globalThis as any;
   if (g.__fetchLoggerInstalled) return;

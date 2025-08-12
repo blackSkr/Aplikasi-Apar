@@ -32,7 +32,7 @@ try {
   port = u.port || (u.protocol === 'https:' ? '443' : '80');
 } catch {}
 
-// 4) Penting: JANGAN pakai 10.0.2.2 otomatis (itu hanya untuk emulator).
+// 4) IMPORTANT: jangan auto 10.0.2.2 (itu khusus emulator).
 export const baseUrl = `${protocol}//${hostname}:${port}`;
 
 export const __CONFIG_DEBUG__ = {

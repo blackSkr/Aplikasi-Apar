@@ -50,6 +50,7 @@ function toUrl(pathOrUrl: string) {
 function offlineResponse(
   reason: 'network' | 'server-5xx' = 'network'
 ): Response & { offline?: boolean; reason?: string } {
+  // Catatan: flag offline & reason ada di BODY JSON. Status HTTP dibuat 200 agar caller bisa .json() tanpa throw.
   return new Response(JSON.stringify({ offline: true, reason }), {
     status: 200,
     headers: { 'Content-Type': 'application/json' },
@@ -59,8 +60,8 @@ function offlineResponse(
 /**
  * safeFetchOffline
  * - GET:
- *    - 2xx/3xx/4xx → return response
- *    - 5xx / network error → return { offline:true, reason }
+ *    - Sukses atau error status (2xx/3xx/4xx/5xx) → return response asli (TIDAK disamarkan jadi offline)
+ *    - Network error (timeout/DNS) → return { offline:true, reason:'network' }
  * - POST/PUT/DELETE:
  *    - network error → enqueue + { offline:true, reason:'network' }
  *    - 5xx           → enqueue + { offline:true, reason:'server-5xx' }
@@ -75,21 +76,19 @@ export async function safeFetchOffline(
 
   console.log(`[Debug][safeFetchOffline] → ${method} ${url}`);
 
+  // ==== GET: jangan samarkan 5xx jadi offline. Hanya network error yang dianggap offline. ====
   if (method === 'GET') {
     try {
       const res = await fetch(url, options);
       console.log('[Debug][safeFetchOffline][GET] status', res.status);
-      if (res.status >= 500) {
-        warn('GET got 5xx → treat as offline');
-        return offlineResponse('server-5xx');
-      }
-      return res as any;
+      return res as any; // biarkan caller bedakan 2xx/4xx/5xx
     } catch (err) {
-      console.warn('[Debug][safeFetchOffline][GET] network error, fallback offline', err);
+      console.warn('[Debug][safeFetchOffline][GET] network error → offline', err);
       return offlineResponse('network');
     }
   }
 
+  // ==== Non-GET: antre saat offline/5xx ====
   const extractBodyParts = (): Array<[string, any]> => {
     const b: any = (options as any).body;
     if (b && Array.isArray(b?._parts)) return b._parts as Array<[string, any]>; // RN FormData
@@ -168,7 +167,6 @@ export async function flushQueue(): Promise<number> {
         } else if (v == null) {
           formData.append(k, '');
         } else {
-          // amankan angka/boolean/object
           formData.append(k, JSON.stringify(v));
         }
       }

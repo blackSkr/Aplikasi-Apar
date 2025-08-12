@@ -24,8 +24,13 @@ import { useOfflineQueue } from '@/hooks/useOfflineQueue';
 import { usePreloadCache } from '@/hooks/usePreloadCache';
 import { router } from 'expo-router';
 
-// ⬇️ import baseUrl + info debug
-import { __CONFIG_DEBUG__, baseUrl } from '@/src/config';
+// Debug & config
+import { __CONFIG_DEBUG__, baseUrl, logApiConfig } from '@/src/config';
+import { installFetchLogger } from '@/src/setupNetworking';
+import { createLogger } from '@/src/utils/logger';
+
+installFetchLogger(); // dipasang sekali (ada guard di dalamnya)
+const log = createLogger('home');
 
 const INITIAL_COUNT = 3;
 const FORCE_CTA_MS = 12000;
@@ -33,18 +38,18 @@ const FORCE_CTA_MS = 12000;
 // probe sederhana dengan timeout, supaya kelihatan URL yang ditembak
 async function debugPing(tag: string) {
   const url = `${baseUrl}/api/peralatan?badge=PING`;
-  console.log(`[debug][${tag}] baseUrl = ${baseUrl}`);
-  console.log(`[debug][${tag}] config =`, __CONFIG_DEBUG__);
-  console.log(`[debug][${tag}] ping GET ${url}`);
+  log.debug(`[${tag}] baseUrl = ${baseUrl}`);
+  log.debug(`[${tag}] config =`, __CONFIG_DEBUG__);
+  log.debug(`[${tag}] ping GET ${url}`);
 
   const controller = new AbortController();
   const id = setTimeout(() => controller.abort(), 6000);
 
   try {
     const r = await fetch(url, { method: 'GET', signal: controller.signal });
-    console.log(`[debug][${tag}] ping status = ${r.status}`);
-  } catch (e) {
-    console.log(`[debug][${tag}] ping error =`, e);
+    log.info(`[${tag}] ping status = ${r.status}`);
+  } catch (e: any) {
+    log.error(`[${tag}] ping error = ${e?.message || e}`);
   } finally {
     clearTimeout(id);
   }
@@ -72,9 +77,10 @@ export default function AparInformasi() {
   // --- DEBUG saat mount: cetak baseUrl + ping ---
   useEffect(() => {
     (async () => {
+      logApiConfig('boot');
       const n = await NetInfo.fetch();
-      console.log(
-        `[debug][home-mount] NetInfo isConnected=${n.isConnected} reachable=${n.isInternetReachable} type=${n.type}`
+      log.info(
+        `[home-mount] NetInfo isConnected=${n.isConnected} reachable=${n.isInternetReachable} type=${n.type}`
       );
       await debugPing('home-mount');
     })();
@@ -131,8 +137,8 @@ export default function AparInformasi() {
       if (debounceTimerRef.current) clearTimeout(debounceTimerRef.current);
 
       if (connected) {
-        console.log(
-          `[debug][net-change-online] NetInfo isConnected=${s.isConnected} reachable=${s.isInternetReachable} type=${s.type}`
+        log.info(
+          `[net-change-online] isConnected=${s.isConnected} reachable=${s.isInternetReachable} type=${s.type}`
         );
         await debugPing('net-change-online');
 

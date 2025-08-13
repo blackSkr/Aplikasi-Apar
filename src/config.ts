@@ -1,71 +1,65 @@
 // src/config.ts
 import Constants from 'expo-constants';
-import { Platform } from 'react-native';
 import * as Device from 'expo-device';
+import { Platform } from 'react-native';
 
-const expoCfg: any = (Constants.expoConfig || (Constants as any).manifest || {}) ?? {};
+// Ambil config dari Expo
+const expoCfg: any = Constants.expoConfig ?? (Constants as any).manifest ?? {};
 const extra: any = expoCfg.extra ?? {};
-const hostFromExpo = (expoCfg as any)?.hostUri?.split(':')?.[0]; // mis. "192.168.1.3" saat Expo LAN
 
-// 1) Env override (build/EAS) -> prioritas tertinggi
+// 1) Env / Extra (prioritas tertinggi)
 const envUrl =
   process.env.EXPO_PUBLIC_API_URL ||
-  process.env.EXPO_PUBLIC_LAN_API_URL ||
   extra.EXPO_PUBLIC_API_URL ||
-  extra.EXPO_PUBLIC_LAN_API_URL || '';
+  extra.stagApiUrl ||
+  extra.localApiUrl ||
+  extra.devApiUrl ||
+  'http://172.16.34.189:3000'; // fallback terakhir = kantor
 
-// 2) Sumber URL berurutan (yang paling penting di depan) + tracer "source"
-let rawUrl = '';
-let source: 'env' | 'local' | 'stag' | 'dev' | 'host' | 'fallback' = 'fallback';
+// 2) Tentukan rawUrl + sumber
+let rawUrl = envUrl;
+let source: 'env' | 'stag' | 'local' | 'dev' | 'fallback' = 'env';
+if (!process.env.EXPO_PUBLIC_API_URL && extra.EXPO_PUBLIC_API_URL) source = 'env';
+else if (!extra.EXPO_PUBLIC_API_URL && extra.stagApiUrl && envUrl === extra.stagApiUrl) source = 'stag';
+else if (!extra.EXPO_PUBLIC_API_URL && extra.localApiUrl && envUrl === extra.localApiUrl) source = 'local';
+else if (!extra.EXPO_PUBLIC_API_URL && extra.devApiUrl && envUrl === extra.devApiUrl) source = 'dev';
+if (!rawUrl) { rawUrl = 'http://172.16.34.189:3000'; source = 'fallback'; }
 
-if (envUrl)                 { rawUrl = envUrl;                        source = 'env'; }
-else if (extra.localApiUrl) { rawUrl = extra.localApiUrl;             source = 'local'; }
-else if (extra.stagApiUrl)  { rawUrl = extra.stagApiUrl;              source = 'stag'; }
-else if (extra.devApiUrl)   { rawUrl = extra.devApiUrl;               source = 'dev'; }
-else if (hostFromExpo)      { rawUrl = `http://${hostFromExpo}:3000`; source = 'host'; }
-else                        { rawUrl = 'http://192.168.1.3:3000';     source = 'fallback'; }
-
-// 3) Parse
+// 3) Parse URL
 let protocol = 'http:';
-let hostname = '192.168.1.3';
+let hostname = '172.16.34.189';
 let port = '3000';
 try {
   const u = new URL(rawUrl);
-  protocol = u.protocol;
-  hostname = u.hostname;
-  port = u.port || (u.protocol === 'https:' ? '443' : '80');
-} catch {}
+  protocol = u.protocol || 'http:';
+  hostname = u.hostname || '172.16.34.189';
+  port = u.port || (protocol === 'https:' ? '443' : '3000');
+} catch { /* keep defaults */ }
 
-// 4) Otomatis pakai 10.0.2.2 hanya di DEV + emulator (tidak mempengaruhi APK rilis di HP fisik)
+// 4) Mapping khusus emulator Android hanya jika host = localhost/127.0.0.1
 let host = hostname;
 if (__DEV__ && Platform.OS === 'android' && !Device.isDevice) {
-  host = '10.0.2.2'; // Genymotion: 10.0.3.2
+  if (hostname === 'localhost' || hostname === '127.0.0.1') {
+    host = '10.0.2.2'; // Genymotion = 10.0.3.2
+  }
 }
 
-// 5) Hard-guard: kalau running di HP fisik & host terdeteksi 172.* / 10.* padahal ada localApiUrl -> paksa ke local
-if (Device.isDevice && extra.localApiUrl && (/^172\./.test(host) || /^10\./.test(host))) {
-  try {
-    const lu = new URL(extra.localApiUrl);
-    host = lu.hostname;
-    protocol = lu.protocol;
-    port = lu.port || (lu.protocol === 'https:' ? '443' : '80');
-    source = 'local';
-  } catch {}
-}
+// ⚠️ Dihapus: hard-guard yang dulu memaksa 172.* kembali ke localApiUrl.
+// (Supaya IP kantor 172.16.34.189 tetap dipakai di HP fisik.)
 
-export const baseUrl = `${protocol}//${host}:${port}`;
+const portPart = port ? `:${port}` : '';
+export const baseUrl = `${protocol}//${host}${portPart}`;
 
 export const __CONFIG_DEBUG__ = {
   baseUrl,
   rawUrl,
   source,
   extra: {
-    localApiUrl: extra.localApiUrl,
-    stagApiUrl: extra.stagApiUrl,
-    devApiUrl: extra.devApiUrl,
     EXPO_PUBLIC_API_URL: extra.EXPO_PUBLIC_API_URL,
-    EXPO_PUBLIC_LAN_API_URL: extra.EXPO_PUBLIC_LAN_API_URL,
-  },
+    stagApiUrl: extra.stagApiUrl,
+    localApiUrl: extra.localApiUrl,
+    devApiUrl: extra.devApiUrl
+  }
 };
 
 export function logApiConfig(tag = 'config') {

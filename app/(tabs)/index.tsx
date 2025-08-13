@@ -280,9 +280,16 @@ export default function AparInformasi() {
           <IndexAparCard
             key={`card-${item.id_apar||index}-${index}`}
             item={item}
-            onPressDetails={() =>
-              router.push({ pathname: '/ManajemenApar/AparMaintenance', params: { id: item.id_apar } })
-            }
+            onPressDetails={() => {
+              const pathname =
+                item.statusMaintenance === 'Sudah'
+                  ? '/ManajemenApar/AparHistory'       // ⬅️ buka riwayat read-only
+                  : '/ManajemenApar/AparMaintenance';  // ⬅️ form input seperti biasa
+              router.push({
+                pathname,
+                params: { id: String(item.id_apar) },
+              });
+            }}
           />
         )}
         renderSectionFooter={({ section }) => renderFooter(section)}

@@ -7,6 +7,8 @@ export default {
   border: '#ECECEC',
   primaryheader:    '#D32F2F',
   primaryLight: '#EF5350', 
+  success: '#4CAF50',
+  error: '#F44336',
   badge: {
     Sehat:   '#4CAF50',
     Trouble: '#FFC107',

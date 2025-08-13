@@ -374,11 +374,29 @@ const Centered = styled(View)` flex: 1; justify-content: center; align-items: ce
 const ScrollContainer = styled(ScrollView)` flex: 1; background-color: #f9fafb; `;
 const Card = styled(View)` background: #fff; margin: 12px 16px; padding: 16px; border-radius: 8px; elevation: 2; `;
 const Label = styled(Text)` font-size: 14px; font-weight: 600; color: #374151; margin-bottom: 8px; margin-top: 4px; `;
-const ReadOnlyInput = styled(TextInput).attrs({ editable: false })`
-  background: #f3f4f6; padding: 12px; border-radius: 6px; margin-bottom: 12px; color: #6b7280; font-size: 14px;
+const ReadOnlyInput = styled(TextInput).attrs({
+  editable: false,
+  placeholderTextColor: '#9CA3AF',
+})`
+  background: #f3f4f6;
+  padding: 12px;
+  border-radius: 6px;
+  margin-bottom: 12px;
+  color: #6b7280;
+  font-size: 14px;
 `;
-const Input = styled(TextInput)` background: #fff; border: 1px solid #d1d5db; padding: 12px; border-radius: 6px; margin-bottom: 12px; `;
-const QuestionText = styled(Text)` font-size: 15px; font-weight: 500; color: #374151; margin-bottom: 8px; `;
+const Input = styled(TextInput).attrs({
+  placeholderTextColor: '#9CA3AF',
+  selectionColor: '#dc2626',
+  cursorColor: '#dc2626',
+})`
+  background: #fff;
+  border: 1px solid #d1d5db;
+  padding: 12px;
+  border-radius: 6px;
+  margin-bottom: 12px;
+  color: #111827; /* Teks jadi terlihat di background putih */
+`;const QuestionText = styled(Text)` font-size: 15px; font-weight: 500; color: #374151; margin-bottom: 8px; `;
 const ButtonRow = styled(View)` flex-direction: row; margin-bottom: 12px; justify-content: space-between; `;
 const Toggle = styled(Pressable)<{ active: boolean }>` flex: 1; background-color: ${({ active }) => (active ? '#dc2626' : '#f3f4f6')}; padding: 12px; border-radius: 6px; align-items: center; margin-horizontal: 4px; border-width: 1px; border-color: ${({ active }) => (active ? '#dc2626' : '#d1d5db')}; `;
 const ToggleText = styled(Text)<{ active: boolean }>` color: ${({ active }) => (active ? '#fff' : '#6b7280')}; font-weight: 600; font-size: 14px; `;

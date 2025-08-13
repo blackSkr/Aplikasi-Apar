@@ -21,6 +21,7 @@ import styled from 'styled-components/native';
 import { useBadge } from '@/context/BadgeContext';
 import { useOfflineQueue } from '@/hooks/useOfflineQueue';
 import { flushQueue, safeFetchOffline } from '@/utils/ManajemenOffline';
+import { useLayoutEffect } from 'react';
 
 type ChecklistItemState = {
   checklistId?: number;
@@ -77,7 +78,12 @@ function normalizeApar(raw: any): AparData {
 }
 
 export default function AparMaintenance() {
+  
   const navigation = useNavigation();
+  useLayoutEffect(() => {
+    navigation.setOptions({ title: 'Inspeksi Alat' });
+  }, [navigation]);
+
   const route = useRoute();
   const { badgeNumber } = useBadge();
   const { count: queueCount, refreshQueue } = useOfflineQueue();

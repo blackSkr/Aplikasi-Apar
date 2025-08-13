@@ -27,7 +27,6 @@ export interface AparRaw {
   last_inspection?: string;
   tanggal_selesai?: string;
   badge_petugas?: string;
-  // tambahkan field lain kalau perlu…
 }
 export interface APAR extends AparRaw {
   daysRemaining: number;
@@ -184,7 +183,7 @@ export function useAparList() {
         { method: 'GET' }
       );
 
-      // 🔴 Penting: 5xx = server bermasalah (bukan offline)
+      // 🔴 5xx = server bermasalah (bukan offline)
       if (res.status >= 500) {
         setOfflineReason('server-5xx');
         const cached = await AsyncStorage.getItem('APAR_CACHE');
@@ -192,32 +191,24 @@ export function useAparList() {
           setRawData(JSON.parse(cached));
           Alert.alert('Server Bermasalah', 'Menampilkan data dari cache.');
         } else {
-          Alert.alert(
-            'Gagal Memuat',
-            `Server bermasalah (HTTP ${res.status}) dan tidak ada cache lokal.`
-          );
+          Alert.alert('Gagal Memuat', `Server bermasalah (HTTP ${res.status}) dan tidak ada cache lokal.`);
           setRawData([]);
         }
         return;
       }
 
-      // parse body
       try {
         const json = await res.json();
 
-        // jika safeFetchOffline menandai offline (network)
+        // safeFetchOffline menandai offline (network)
         if ((json as any)?.offline) {
-          const reason =
-            (json as any)?.reason === 'server-5xx' ? 'server-5xx' : 'network';
+          const reason = (json as any)?.reason === 'server-5xx' ? 'server-5xx' : 'network';
           setOfflineReason(reason);
 
           const cached = await AsyncStorage.getItem('APAR_CACHE');
           if (cached) {
             setRawData(JSON.parse(cached));
-            Alert.alert(
-              reason === 'server-5xx' ? 'Server Bermasalah' : 'Offline Mode',
-              'Menampilkan data dari cache.'
-            );
+            Alert.alert(reason === 'server-5xx' ? 'Server Bermasalah' : 'Offline Mode', 'Menampilkan data dari cache.');
           } else {
             Alert.alert('Gagal Memuat', 'Tidak ada cache lokal.');
             setRawData([]);
@@ -241,9 +232,7 @@ export function useAparList() {
           no_apar: d.no_apar,
           lokasi_apar: d.lokasi_apar,
           jenis_apar: d.jenis_apar,
-          statusMaintenance: d.last_inspection
-            ? ('Sudah' as MaintenanceStatus)
-            : ('Belum' as MaintenanceStatus),
+          statusMaintenance: d.last_inspection ? 'Sudah' as MaintenanceStatus : 'Belum' as MaintenanceStatus,
           interval_maintenance: (d.kuota_per_bulan ?? 1) * 30,
           nextDueDate: d.next_due_date ?? '',
           last_inspection: d.last_inspection ?? undefined,
@@ -264,10 +253,7 @@ export function useAparList() {
         const cached = await AsyncStorage.getItem('APAR_CACHE');
         if (cached) {
           setRawData(JSON.parse(cached));
-          Alert.alert(
-            offlineReason === 'server-5xx' ? 'Server Bermasalah' : 'Offline Mode',
-            'Menampilkan data dari cache.'
-          );
+          Alert.alert(offlineReason === 'server-5xx' ? 'Server Bermasalah' : 'Offline Mode', 'Menampilkan data dari cache.');
         } else {
           Alert.alert('Gagal Memuat', 'Kesalahan parsing data.');
           setRawData([]);
@@ -277,10 +263,7 @@ export function useAparList() {
       const cached = await AsyncStorage.getItem('APAR_CACHE');
       if (cached) {
         setRawData(JSON.parse(cached));
-        Alert.alert(
-          offlineReason === 'server-5xx' ? 'Server Bermasalah' : 'Offline Mode',
-          'Menampilkan data dari cache.'
-        );
+        Alert.alert(offlineReason === 'server-5xx' ? 'Server Bermasalah' : 'Offline Mode', 'Menampilkan data dari cache.');
       } else {
         Alert.alert('Gagal Memuat', e?.message || 'Terjadi kesalahan.');
         setRawData([]);

@@ -14,14 +14,16 @@ const envUrl =
   extra.EXPO_PUBLIC_API_URL ||
   extra.EXPO_PUBLIC_LAN_API_URL || '';
 
-// 2) Sumber URL berurutan (yang paling penting di depan)
-let rawUrl =
-  envUrl ||
-  extra.localApiUrl ||                 // IP Wi-Fi rumah (untuk HP fisik)
-  extra.stagApiUrl ||                  // IP kantor (kalau dipakai)
-  extra.devApiUrl ||                   // localhost (dev PC)
-  (hostFromExpo ? `http://${hostFromExpo}:3000` : '') ||
-  'http://192.168.1.3:3000';           // fallback terakhir
+// 2) Sumber URL berurutan (yang paling penting di depan) + tracer "source"
+let rawUrl = '';
+let source: 'env' | 'local' | 'stag' | 'dev' | 'host' | 'fallback' = 'fallback';
+
+if (envUrl)                 { rawUrl = envUrl;                        source = 'env'; }
+else if (extra.localApiUrl) { rawUrl = extra.localApiUrl;             source = 'local'; }
+else if (extra.stagApiUrl)  { rawUrl = extra.stagApiUrl;              source = 'stag'; }
+else if (extra.devApiUrl)   { rawUrl = extra.devApiUrl;               source = 'dev'; }
+else if (hostFromExpo)      { rawUrl = `http://${hostFromExpo}:3000`; source = 'host'; }
+else                        { rawUrl = 'http://192.168.1.3:3000';     source = 'fallback'; }
 
 // 3) Parse
 let protocol = 'http:';
@@ -40,15 +42,29 @@ if (__DEV__ && Platform.OS === 'android' && !Device.isDevice) {
   host = '10.0.2.2'; // Genymotion: 10.0.3.2
 }
 
+// 5) Hard-guard: kalau running di HP fisik & host terdeteksi 172.* / 10.* padahal ada localApiUrl -> paksa ke local
+if (Device.isDevice && extra.localApiUrl && (/^172\./.test(host) || /^10\./.test(host))) {
+  try {
+    const lu = new URL(extra.localApiUrl);
+    host = lu.hostname;
+    protocol = lu.protocol;
+    port = lu.port || (lu.protocol === 'https:' ? '443' : '80');
+    source = 'local';
+  } catch {}
+}
+
 export const baseUrl = `${protocol}//${host}:${port}`;
 
 export const __CONFIG_DEBUG__ = {
   baseUrl,
   rawUrl,
+  source,
   extra: {
     localApiUrl: extra.localApiUrl,
     stagApiUrl: extra.stagApiUrl,
     devApiUrl: extra.devApiUrl,
+    EXPO_PUBLIC_API_URL: extra.EXPO_PUBLIC_API_URL,
+    EXPO_PUBLIC_LAN_API_URL: extra.EXPO_PUBLIC_LAN_API_URL,
   },
 };
 

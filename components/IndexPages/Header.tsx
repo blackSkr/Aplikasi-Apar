@@ -2,6 +2,7 @@
 import Colors from '@/constants/Colors';
 import { useBadge } from '@/context/BadgeContext';
 import { Ionicons } from '@expo/vector-icons';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useNetInfo } from '@react-native-community/netinfo';
 import Constants from 'expo-constants';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -12,11 +13,10 @@ import { baseUrl } from '../../src/config';
 
 type HeaderProps = {
   onLogout: (e: GestureResponderEvent) => void;
-  /** Nama jenis yang dipilih (contoh: "CO2", "Dry Powder").
-   * Jika null/undefined → header akan menampilkan "📋 Manajemen Seluruh Peralatan"
-   */
   selectedJenis?: string | null;
 };
+
+type Profile = { badgeNumber: string; nama?: string; lokasi?: string };
 
 const prettify = (s?: string | null) => {
   if (!s) return '';
@@ -31,35 +31,58 @@ const prettify = (s?: string | null) => {
 const Header: FC<HeaderProps> = ({ onLogout, selectedJenis }) => {
   const [now, setNow] = useState(new Date());
   const [lokasi, setLokasi] = useState<string>('');
-  const [loadingLokasi, setLoadingLokasi] = useState(false);
+  const [nama, setNama] = useState<string>('');
+  const [loadingProfile, setLoadingProfile] = useState(false);
 
   const netInfo = useNetInfo();
   const isConnected = !!netInfo.isConnected;
   const { badgeNumber } = useBadge();
-
   const jenisLabel = useMemo(() => prettify(selectedJenis), [selectedJenis]);
 
   useEffect(() => {
     let ignore = false;
-    const fetchLokasi = async () => {
+
+    const fetchProfile = async () => {
       if (!badgeNumber) {
+        setNama('');
         setLokasi('');
         return;
       }
-      setLoadingLokasi(true);
+      setLoadingProfile(true);
+      const cacheKey = `PETUGAS_PROFILE_${badgeNumber}`;
+
       try {
-        const res = await fetch(`${baseUrl}/api/petugas/lokasi/${encodeURIComponent(badgeNumber)}`);
+        const res = await fetch(
+          `${baseUrl}/api/petugas/profile/${encodeURIComponent(badgeNumber)}`
+        );
         if (!res.ok) throw new Error('not found');
-        const data = await res.json();
-        if (!ignore) setLokasi(data?.lokasi || '');
+        const data: Profile = await res.json();
+
+        if (!ignore) {
+          setNama(data?.nama?.trim?.() || '');
+          setLokasi(data?.lokasi?.trim?.() || '');
+        }
+
+        await AsyncStorage.setItem(cacheKey, JSON.stringify(data));
       } catch {
-        if (!ignore) setLokasi('');
+        const cached = await AsyncStorage.getItem(cacheKey);
+        if (cached && !ignore) {
+          const data: Profile = JSON.parse(cached);
+          setNama(data?.nama?.trim?.() || '');
+          setLokasi(data?.lokasi?.trim?.() || '');
+        } else if (!ignore) {
+          setNama('');
+          setLokasi('');
+        }
       } finally {
-        if (!ignore) setLoadingLokasi(false);
+        if (!ignore) setLoadingProfile(false);
       }
     };
-    fetchLokasi();
-    return () => { ignore = true; };
+
+    fetchProfile();
+    return () => {
+      ignore = true;
+    };
   }, [badgeNumber]);
 
   useEffect(() => {
@@ -68,10 +91,15 @@ const Header: FC<HeaderProps> = ({ onLogout, selectedJenis }) => {
   }, []);
 
   const dateStr = now.toLocaleDateString('id-ID', {
-    weekday: 'short', day: 'numeric', month: 'short', year: 'numeric',
+    weekday: 'short',
+    day: 'numeric',
+    month: 'short',
+    year: 'numeric',
   });
   const timeStr = now.toLocaleTimeString('id-ID', {
-    hour: '2-digit', minute: '2-digit', second: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
   });
 
   const hour = now.getHours();
@@ -81,36 +109,49 @@ const Header: FC<HeaderProps> = ({ onLogout, selectedJenis }) => {
   else if (hour < 18) greeting = 'Selamat sore';
   else greeting = 'Selamat malam';
 
-  const subtitle = badgeNumber ? `${greeting}, ${badgeNumber}!` : `${greeting}!`;
+  const displayName = nama?.trim() || badgeNumber || '';
+  const subtitle = displayName
+    ? `${greeting}, ${displayName}!`
+    : `${greeting}!`;
 
   return (
     <HeaderContainer>
       <TopRow>
         <LogoTitle>
           <LogoWrapper>
-            <Logo source={require('../../assets/images/kpc-logo.png')} resizeMode="contain" />
+            <Logo
+              source={require('../../assets/images/kpc-logo.png')}
+              resizeMode="contain"
+            />
           </LogoWrapper>
 
           <TitleGroup>
-            {/* Judul dinamis: jika ada jenis → tampilkan “Manajemen – Jenis”, else fallback menarik */}
             {jenisLabel ? (
               <TitleRow>
-                <TitleText numberOfLines={1} ellipsizeMode="tail">Manajemen</TitleText>
+                <TitleText numberOfLines={1} ellipsizeMode="tail">
+                  Manajemen
+                </TitleText>
                 <Dash />
-                <JenisText numberOfLines={1} ellipsizeMode="tail">{jenisLabel}</JenisText>
+                <JenisText numberOfLines={1} ellipsizeMode="tail">
+                  {jenisLabel}
+                </JenisText>
               </TitleRow>
             ) : (
               <TitleRow>
-                <JenisText numberOfLines={1} ellipsizeMode="tail">Manajemen Alat</JenisText>
+                <JenisText numberOfLines={1} ellipsizeMode="tail">
+                  Manajemen Alat
+                </JenisText>
               </TitleRow>
             )}
 
-            <SubtitleText numberOfLines={1} ellipsizeMode="tail">{subtitle}</SubtitleText>
+            <SubtitleText numberOfLines={1} ellipsizeMode="tail">
+              {subtitle}
+            </SubtitleText>
 
             <LokasiText>
               <Ionicons name="location-outline" size={12} color="#fff" />
               <LokasiLabel numberOfLines={1}>
-                {loadingLokasi
+                {loadingProfile
                   ? 'Memuat lokasi...'
                   : lokasi
                   ? lokasi
@@ -126,7 +167,11 @@ const Header: FC<HeaderProps> = ({ onLogout, selectedJenis }) => {
       </TopRow>
 
       <TimeRow>
-        <Ionicons name="calendar-outline" size={14} color="rgba(255,255,255,0.8)" />
+        <Ionicons
+          name="calendar-outline"
+          size={14}
+          color="rgba(255,255,255,0.8)"
+        />
         <TimeText>{dateStr}</TimeText>
         <Ionicons
           name="time-outline"
@@ -219,7 +264,7 @@ const JenisText = styled.Text`
 `;
 
 const SubtitleText = styled.Text`
-  color: rgba(255,255,255,0.85);
+  color: rgba(255, 255, 255, 0.85);
   font-size: 13px;
   margin-top: 2px;
 `;
@@ -240,7 +285,7 @@ const LokasiLabel = styled.Text`
 
 const LogoutButton = styled.TouchableOpacity`
   padding: 8px;
-  background-color: rgba(255,255,255,0.3);
+  background-color: rgba(255, 255, 255, 0.3);
   border-radius: 16px;
   margin-left: 12px;
 `;
@@ -253,7 +298,7 @@ const TimeRow = styled.View`
 `;
 
 const TimeText = styled.Text`
-  color: rgba(255,255,255,0.8);
+  color: rgba(255, 255, 255, 0.8);
   font-size: 12px;
   margin-left: 6px;
 `;

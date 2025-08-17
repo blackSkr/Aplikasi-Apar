@@ -1,6 +1,7 @@
 // app/ManajemenApar/AparHistory.tsx
+import { useNavigation } from '@react-navigation/native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   Image,
@@ -117,6 +118,10 @@ const parseStringParam = (v: string | string[] | undefined) => (Array.isArray(v)
    Main
    ========================= */
 export default function AparHistoryScreen() {
+  const navigation = useNavigation();
+  useLayoutEffect(() => {
+    navigation.setOptions({ title: 'Riwayat Inspeksi' });
+  }, [navigation]);
   const params = useLocalSearchParams<{ id?: string | string[]; no?: string | string[] }>();
   const router = useRouter();
   const aparId = useMemo(() => parseNumberParam(params?.id), [params?.id]);
@@ -280,6 +285,7 @@ export default function AparHistoryScreen() {
   }
 
   return (
+    
     <SafeAreaView style={{ flex: 1, backgroundColor: '#f6f6f6' }}>
       {!!offline && (
         <Banner>

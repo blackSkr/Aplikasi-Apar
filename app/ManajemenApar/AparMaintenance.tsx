@@ -8,7 +8,9 @@ import {
   ActivityIndicator,
   Alert,
   Image,
+  Keyboard,
   KeyboardAvoidingView,
+  LayoutAnimation,
   Platform,
   Pressable,
   ScrollView,
@@ -27,8 +29,47 @@ import {
 } from '@/src/cacheTTL';
 import { baseUrl } from '@/src/config';
 import { flushQueue, safeFetchOffline } from '@/utils/ManajemenOffline';
+import { useHeaderHeight } from '@react-navigation/elements';
 import { useRouter } from 'expo-router';
 import { useLayoutEffect } from 'react';
+
+/* ===========================
+   HOOK: dynamic keyboard height
+   =========================== */
+function useKeyboardHeight() {
+  const [height, setHeight] = useState(0);
+
+  useEffect(() => {
+    const animate = () => {
+      try {
+        LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+      } catch {}
+    };
+
+    const onShow = (e: any) => {
+      animate();
+      const h = e?.endCoordinates?.height ?? 0;
+      setHeight(h);
+    };
+
+    const onHide = () => {
+      animate();
+      setHeight(0);
+    };
+
+    const showEvt = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
+    const hideEvt = Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide';
+
+    const subShow = Keyboard.addListener(showEvt, onShow);
+    const subHide = Keyboard.addListener(hideEvt, onHide);
+    return () => {
+      subShow.remove();
+      subHide.remove();
+    };
+  }, []);
+
+  return height;
+}
 
 type ChecklistItemState = {
   checklistId?: number;
@@ -91,6 +132,8 @@ export default function AparMaintenance() {
     navigation.setOptions({ title: 'Inspeksi Alat' });
   }, [navigation]);
 
+  const headerHeight = useHeaderHeight();
+  const keyboardHeight = useKeyboardHeight();
   const router = useRouter();
 
   const route = useRoute();
@@ -158,9 +201,7 @@ export default function AparMaintenance() {
     }
 
     // === Guard: jika bukan petugas / tidak boleh inspeksi → pindah ke History
-    // (hanya kalau kita punya id_apar valid)
     if (apar.id_apar && (!apar.intervalPetugasId || apar.canInspect === 0)) {
-      // pakai replace agar tidak bisa back ke form
       router.replace({ pathname: '/ManajemenApar/AparHistory', params: { id: String(apar.id_apar), no: apar.no_apar || '' } });
     }
   };
@@ -382,12 +423,19 @@ export default function AparMaintenance() {
     );
   }
 
+  // padding bawah dinamis = tinggi keyboard + sedikit margin
+  const dynamicBottomPad = (keyboardHeight || 0) + 16;
+
   return (
     <KeyboardAvoidingView
-      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
       style={{ flex: 1 }}
+      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+      keyboardVerticalOffset={headerHeight} // offset agar tidak tabrakan dengan header/navbar
     >
-      <ScrollContainer>
+      <ScrollContainer
+        keyboardShouldPersistTaps="handled"
+        contentContainerStyle={{ paddingBottom: dynamicBottomPad }}
+      >
         {/* DETAIL APAR */}
         <Card>
           <Label>No APAR:</Label>
@@ -424,6 +472,9 @@ export default function AparMaintenance() {
                     onChangeText={t => updateChecklist(i, { alasan: t })}
                     placeholder="Jelaskan masalah"
                     multiline
+                    textAlignVertical="top"
+                    returnKeyType="done"
+                    onSubmitEditing={Keyboard.dismiss}
                   />
                 </>
               )}
@@ -447,11 +498,11 @@ export default function AparMaintenance() {
           <Label>Kondisi Umum:</Label>
           <Input value={kondisi} onChangeText={setKondisi} placeholder="Masukkan kondisi umum" />
           <Label>Catatan Masalah:</Label>
-          <Input value={catatanMasalah} onChangeText={setCatatanMasalah} placeholder="Masukkan catatan masalah" multiline />
+          <Input value={catatanMasalah} onChangeText={setCatatanMasalah} placeholder="Masukkan catatan masalah" multiline textAlignVertical="top" />
           <Label>Rekomendasi:</Label>
-          <Input value={rekomendasi} onChangeText={setRekomendasi} placeholder="Masukkan rekomendasi" multiline />
+          <Input value={rekomendasi} onChangeText={setRekomendasi} placeholder="Masukkan rekomendasi" multiline textAlignVertical="top" />
           <Label>Tindak Lanjut:</Label>
-          <Input value={tindakLanjut} onChangeText={setTindakLanjut} placeholder="Masukkan tindak lanjut" multiline />
+          <Input value={tindakLanjut} onChangeText={setTindakLanjut} placeholder="Masukkan tindak lanjut" multiline textAlignVertical="top" />
           <Label>Tekanan (bar):</Label>
           <Input value={tekanan} onChangeText={setTekanan} placeholder="Masukkan tekanan" keyboardType="numeric" />
           <Label>Jumlah Masalah:</Label>
@@ -468,7 +519,10 @@ export default function AparMaintenance() {
 
 // ========== STYLED ==========
 const Centered = styled(View)` flex: 1; justify-content: center; align-items: center; padding: 20px; `;
-const ScrollContainer = styled(ScrollView)` flex: 1; background-color: #f9fafb; `;
+const ScrollContainer = styled(ScrollView).attrs({
+  // penting supaya tap pada input tetap fokus walau keyboard terbuka
+  keyboardShouldPersistTaps: 'handled',
+})` flex: 1; background-color: #f9fafb; `;
 const Card = styled(View)` background: #fff; margin: 12px 16px; padding: 16px; border-radius: 8px; elevation: 2; `;
 const Label = styled(Text)` font-size: 14px; font-weight: 600; color: #374151; margin-bottom: 8px; margin-top: 4px; `;
 const ReadOnlyInput = styled(TextInput).attrs({

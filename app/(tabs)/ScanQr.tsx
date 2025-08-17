@@ -2,6 +2,7 @@
 import Colors from '@/constants/Colors';
 import { useBadge } from '@/context/BadgeContext';
 import { DETAIL_ID_PREFIX, DETAIL_TOKEN_PREFIX } from '@/src/cacheTTL';
+import { baseUrl } from '@/src/config';
 import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import NetInfo from '@react-native-community/netinfo';
@@ -20,6 +21,22 @@ import {
 import styled from 'styled-components/native';
 
 const ALLOW_NAV_WITHOUT_CACHE_WHEN_OFFLINE = false;
+
+type PreflightData = {
+  id_apar: number;
+  no_apar: string;
+  lokasi_apar: string;
+  jenis_apar: string;
+  IntervalPetugasId?: number | null;
+  namaIntervalPetugas?: string | null;
+  bulanIntervalPetugas?: number | null;
+  defaultIntervalBulan?: number;
+  canInspect?: 0 | 1;
+};
+type PreflightResult =
+  | { mode: 'history'; id: number; no?: string }
+  | { mode: 'maintenance'; token: string }
+  | { mode: 'unknown' };
 
 const ScanQr: React.FC = () => {
   const router = useRouter();
@@ -74,31 +91,19 @@ const ScanQr: React.FC = () => {
   const checkLocalDetail = useCallback(async (token: string) => {
     setCheckingCache(true);
     try {
-      // cek key standar by token
       const k1 = `${DETAIL_TOKEN_PREFIX}${token}`;
       const v1 = await AsyncStorage.getItem(k1);
-      if (v1) {
-        setHasLocalDetail(true);
-        return;
-      }
+      if (v1) { setHasLocalDetail(true); return; }
 
-      // beberapa versi lama pakai encodeURIComponent; cek juga
       const k1b = `${DETAIL_TOKEN_PREFIX}${encodeURIComponent(token)}`;
       const v1b = await AsyncStorage.getItem(k1b);
-      if (v1b) {
-        setHasLocalDetail(true);
-        return;
-      }
+      if (v1b) { setHasLocalDetail(true); return; }
 
-      // cek mapping token -> id lalu cek detail by id
       const mappedId = await AsyncStorage.getItem(`APAR_TOKEN_${token}`);
       if (mappedId) {
         const k2 = `${DETAIL_ID_PREFIX}${mappedId}`;
         const v2 = await AsyncStorage.getItem(k2);
-        if (v2) {
-          setHasLocalDetail(true);
-          return;
-        }
+        if (v2) { setHasLocalDetail(true); return; }
       }
 
       setHasLocalDetail(false);
@@ -125,30 +130,70 @@ const ScanQr: React.FC = () => {
     return hasLocalDetail || ALLOW_NAV_WITHOUT_CACHE_WHEN_OFFLINE;
   }, [badgeNumber, qrToken, isConnected, hasLocalDetail, offlineCapable]);
 
+  // === Preflight ke BE (hanya saat online) ===
+  const preflightScan = async (token: string): Promise<PreflightResult> => {
+    try {
+      const url = `${baseUrl}/api/perawatan/with-checklist/by-token-safe?token=${encodeURIComponent(token)}&badge=${encodeURIComponent(badgeNumber||'')}`;
+      const res = await fetch(url, { method: 'GET' });
+      if (!res.ok) return { mode: 'unknown' };
+
+      const json = await res.json();
+      const data: PreflightData | undefined = json?.data ?? json;
+      if (!data || typeof data.id_apar !== 'number') return { mode: 'unknown' };
+
+      // Rule FE:
+      // - jika tidak ada IntervalPetugasId (bukan petugas utk interval) → HISTORY
+      // - atau canInspect === 0 (belum due untuk petugas tsb) → HISTORY
+      if (!data.IntervalPetugasId || data.canInspect === 0) {
+        return { mode: 'history', id: data.id_apar, no: data.no_apar };
+      }
+
+      // else boleh inspeksi
+      return { mode: 'maintenance', token };
+    } catch {
+      return { mode: 'unknown' };
+    }
+  };
+
   const goToDetail = async () => {
     if (!qrToken || !badgeNumber) {
       Alert.alert('QR tidak valid', 'Token atau badge tidak tersedia.');
       return;
     }
 
-    if (!isConnected) {
-      if (!offlineCapable) {
-        Alert.alert('Mode Online-only', 'Akun ini tidak mendukung akses offline. Silakan sambungkan internet.');
+    // === ONLINE: lakukan preflight sebelum memutuskan halaman ===
+    if (isConnected) {
+      const pf = await preflightScan(qrToken);
+      if (pf.mode === 'history') {
+        router.push({ pathname: '/ManajemenApar/AparHistory', params: { id: String(pf.id), no: pf.no || '' } });
         return;
       }
-      if (!hasLocalDetail && !ALLOW_NAV_WITHOUT_CACHE_WHEN_OFFLINE) {
-        // coba mapping token → id agar tetap bisa pakai param id saat offline
-        const id = await AsyncStorage.getItem(`APAR_TOKEN_${qrToken}`);
-        if (id) {
-          router.push({ pathname: '/ManajemenApar/AparMaintenance', params: { id } });
-          return;
-        }
-        Alert.alert('Butuh Data Lokal', 'Detail token ini belum tersimpan. Buka sekali saat online agar bisa diakses offline.');
+      if (pf.mode === 'maintenance') {
+        router.push({ pathname: '/ManajemenApar/AparMaintenance', params: { token: qrToken } });
         return;
       }
+      // pf unknown → fallback ke aturan lama (buka maintenance; AparMaintenance juga punya guard)
+      router.push({ pathname: '/ManajemenApar/AparMaintenance', params: { token: qrToken } });
+      return;
     }
 
-    // default: navigasi by token (akan di-handle AparMaintenance)
+    // === OFFLINE: fallback sesuai kemampuan offline
+    if (!offlineCapable) {
+      Alert.alert('Mode Online-only', 'Akun ini tidak mendukung akses offline. Silakan sambungkan internet.');
+      return;
+    }
+    if (!hasLocalDetail && !ALLOW_NAV_WITHOUT_CACHE_WHEN_OFFLINE) {
+      // coba mapping token → id agar bisa ke History
+      const id = await AsyncStorage.getItem(`APAR_TOKEN_${qrToken}`);
+      if (id) {
+        router.push({ pathname: '/ManajemenApar/AparHistory', params: { id } });
+        return;
+      }
+      Alert.alert('Butuh Data Lokal', 'Detail token ini belum tersimpan. Buka sekali saat online agar bisa diakses offline.');
+      return;
+    }
+
+    // default offline: navigasi by token (AparMaintenance akan load cache)
     router.push({ pathname: '/ManajemenApar/AparMaintenance', params: { token: qrToken } });
   };
 
@@ -248,16 +293,16 @@ const ScanQr: React.FC = () => {
         </ScannerContainer>
 
         <Instruction>
-          {scanned ? 'Tekan tombol di bawah untuk lihat detail APAR.' : 'Setelah frame hijau, hasil scan akan muncul di sini.'}
+          {scanned ? 'Tekan tombol di bawah untuk proses hasil scan.' : 'Setelah frame hijau, hasil scan akan muncul di sini.'}
         </Instruction>
 
         <PrimaryButton onPress={goToDetail} disabled={!canNavigate} activeOpacity={0.8}>
           <ButtonText>
             {isConnected
-              ? 'LIHAT DETAIL'
+              ? 'LANJUTKAN'
               : offlineCapable
               ? (hasLocalDetail || ALLOW_NAV_WITHOUT_CACHE_WHEN_OFFLINE
-                ? 'LIHAT DETAIL (Offline)'
+                ? 'LANJUTKAN (Offline)'
                 : 'DETAIL BELUM TERSIMPAN')
               : 'MODE ONLINE-ONLY'}
           </ButtonText>

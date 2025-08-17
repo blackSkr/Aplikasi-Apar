@@ -23,11 +23,9 @@ const ALLOW_NAV_WITHOUT_CACHE_WHEN_OFFLINE = false;
 
 const ScanQr: React.FC = () => {
   const router = useRouter();
-  const { badgeNumber, offlineCapable } = useBadge(); // ⬅️ pakai offlineCapable
+  const { badgeNumber, offlineCapable } = useBadge();
 
   const [permission, requestPermission] = useCameraPermissions();
-
-  // ⬇️ flag kontrol mount/unmount kamera
   const [camEnabled, setCamEnabled] = useState<boolean>(false);
 
   const [scanned, setScanned] = useState(false);
@@ -36,7 +34,6 @@ const ScanQr: React.FC = () => {
   const [hasLocalDetail, setHasLocalDetail] = useState<boolean>(false);
   const [checkingCache, setCheckingCache] = useState<boolean>(false);
 
-  // Fokus screen → nyalakan kamera + reset state
   useFocusEffect(
     useCallback(() => {
       let unsubNet: ReturnType<typeof NetInfo.addEventListener> | null = null;
@@ -46,7 +43,6 @@ const ScanQr: React.FC = () => {
       setHasLocalDetail(false);
 
       setCamEnabled(true);
-
       unsubNet = NetInfo.addEventListener(s => setIsConnected(!!s.isConnected));
       return () => {
         setCamEnabled(false);
@@ -55,12 +51,22 @@ const ScanQr: React.FC = () => {
     }, [])
   );
 
+  // ⬇️ PARSER DITINGKATKAN: dukung URL → ambil ?token atau ?id
   const parseQrPayload = (raw: string): string | null => {
     try {
       const obj = JSON.parse(raw);
       const token = obj?.id || obj?.token || obj?.Id || obj?.Token;
       if (typeof token === 'string' && token.trim()) return token.trim();
     } catch {}
+    if (/^https?:\/\//i.test(raw)) {
+      try {
+        const u = new URL(raw);
+        const t = u.searchParams.get('token') || u.searchParams.get('Token');
+        const id = u.searchParams.get('id') || u.searchParams.get('aparId');
+        if (t && t.trim()) return t.trim();
+        if (id && /^\d+$/.test(id)) return id.trim();
+      } catch {}
+    }
     if (typeof raw === 'string' && raw.trim()) return raw.trim();
     return null;
   };
@@ -79,7 +85,7 @@ const ScanQr: React.FC = () => {
   const handleBarcodeScanned = ({ data }: { data: string }) => {
     const token = parseQrPayload(data);
     if (!token) {
-      Alert.alert('QR tidak valid', 'Gunakan QR JSON `{ "id": "..." }` atau token string.');
+      Alert.alert('QR tidak valid', 'Gunakan QR JSON `{ "id": "..." }`, URL dengan `?token=`, atau token string.');
       return;
     }
     setQrToken(token);
@@ -90,7 +96,6 @@ const ScanQr: React.FC = () => {
   const canNavigate = useMemo(() => {
     if (!badgeNumber || !qrToken) return false;
     if (isConnected) return true;
-    // Jika offline, hanya boleh jika offlineCapable DAN detail sudah ada di cache
     if (!offlineCapable) return false;
     return hasLocalDetail || ALLOW_NAV_WITHOUT_CACHE_WHEN_OFFLINE;
   }, [badgeNumber, qrToken, isConnected, hasLocalDetail, offlineCapable]);
@@ -162,7 +167,6 @@ const ScanQr: React.FC = () => {
         </OfflineBanner>
       )}
 
-      {/* ⬇️ Banner tambahan untuk mode online-only */}
       {!isConnected && !offlineCapable && (
         <OfflineBanner>
           <OfflineText>⚠️ Mode Online-only — akun ini tidak mendukung akses detail secara offline.</OfflineText>
@@ -171,7 +175,6 @@ const ScanQr: React.FC = () => {
 
       <Content>
         <ScannerContainer>
-          {/* HANYA render CameraView saat camEnabled = true (screen fokus) */}
           {camEnabled && (
             <CameraView
               key={camEnabled ? 'cam-on' : 'cam-off'}

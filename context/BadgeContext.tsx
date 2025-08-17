@@ -1,3 +1,4 @@
+// context/BadgeContext.tsx
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import React, {
   createContext,
@@ -23,24 +24,54 @@ import {
 } from 'react-native';
 
 import { baseUrl } from '@/src/config';
-import { isRescue, PetugasInfo } from '@/src/types/petugas';
 import { safeFetchOffline } from '@/utils/ManajemenOffline';
 
+// ===== Types =====
+export interface PetugasInfo {
+  badge: string;
+  role?: string | null;
+  lokasiId?: number | null;
+  lokasiNama?: string | null;
+  intervalId?: number | null;
+  intervalNama?: string | null;
+  intervalBulan?: number | null;
+}
+
+export interface EmployeeInfo {
+  badge: string;
+  nama?: string | null;
+  divisi?: string | null;
+  departemen?: string | null;
+  status?: string | null;
+}
+
+function isRescue(role?: string | null) {
+  if (!role) return false;
+  const r = String(role).toLowerCase();
+  return r === 'rescue' || r.includes('rescue');
+}
+
+// ===== Storage keys =====
 const BADGE_KEY = 'BADGE_NUMBER';
 const BADGE_TIMESTAMP_KEY = 'BADGE_TIMESTAMP';
 const PETUGAS_INFO_KEY = 'PETUGAS_INFO';
+const EMPLOYEE_INFO_KEY = 'EMPLOYEE_INFO';
 
+// ===== Context =====
 interface BadgeContextValue {
   badgeNumber: string;
   petugasInfo: PetugasInfo | null;
-  offlineCapable: boolean; // rescue ATAU punya lokasi
+  employeeInfo: EmployeeInfo | null;
+  isEmployeeOnly: boolean;   // true jika hanya employee (bukan petugas)
+  offlineCapable: boolean;   // rescue ATAU punya lokasi (khusus petugas)
   setBadgeNumber: (b: string) => Promise<void>;
   clearBadgeNumber: () => Promise<void>;
 }
-
 const BadgeContext = createContext<BadgeContextValue>({
   badgeNumber: '',
   petugasInfo: null,
+  employeeInfo: null,
+  isEmployeeOnly: false,
   offlineCapable: false,
   setBadgeNumber: async () => {},
   clearBadgeNumber: async () => {},
@@ -48,7 +79,7 @@ const BadgeContext = createContext<BadgeContextValue>({
 
 export const useBadge = () => useContext(BadgeContext);
 
-/** ====== UI Modal Input Badge ====== */
+// ===== Modal UI =====
 function BadgeModal({
   onSave,
   loading,
@@ -101,15 +132,26 @@ function BadgeModal({
   );
 }
 
-/** ====== Provider ====== */
+// ===== Provider =====
 export const BadgeProvider = ({ children }: { children: ReactNode }) => {
   const [badgeNumber, setBadge] = useState('');
   const [petugasInfo, setPetugasInfo] = useState<PetugasInfo | null>(null);
+  const [employeeInfo, setEmployeeInfo] = useState<EmployeeInfo | null>(null);
   const [showModal, setShowModal] = useState(false);
   const [ready, setReady] = useState(false);
   const [validating, setValidating] = useState(false);
 
-  /** Normalisasi respons server menjadi PetugasInfo */
+  // ---- helpers normalisasi ----
+  const toEmployeeInfo = useCallback((badge: string, raw: any): EmployeeInfo => {
+    return {
+      badge,
+      nama: raw?.Nama ?? raw?.nama ?? raw?.EmployeeName ?? null,
+      divisi: raw?.Divisi ?? raw?.divisi ?? null,
+      departemen: raw?.Departemen ?? raw?.departemen ?? null,
+      status: raw?.Status ?? raw?.status ?? null,
+    };
+  }, []);
+
   const toPetugasInfo = useCallback((badge: string, raw: any, intervalDetail?: any): PetugasInfo => {
     const role =
       raw?.Role ?? raw?.role ?? raw?.petugas?.Role ?? raw?.petugas?.role ?? null;
@@ -149,17 +191,28 @@ export const BadgeProvider = ({ children }: { children: ReactNode }) => {
     return null;
   }, []);
 
-  /** Cek cache badge+info (TTL 1 jam) */
+  // ---- HTTP helper ----
+  const getJson = useCallback(async (url: string) => {
+    const res = await safeFetchOffline(url, { method: 'GET' });
+    let json: any = null;
+    try { json = await res.json(); } catch {}
+    const offline = !!json?.offline;
+    return { res, json, offline };
+  }, []);
+
+  // ---- cache badge (TTL 1 jam) ----
   const checkBadgeValidity = useCallback(async () => {
-    const [[, b], [, ts], [, infoStr]] = await AsyncStorage.multiGet([
+    const [[, b], [, ts], [, petStr], [, empStr]] = await AsyncStorage.multiGet([
       BADGE_KEY,
       BADGE_TIMESTAMP_KEY,
       PETUGAS_INFO_KEY,
+      EMPLOYEE_INFO_KEY,
     ]);
 
     if (!b || !ts) {
       setBadge('');
       setPetugasInfo(null);
+      setEmployeeInfo(null);
       setShowModal(true);
       return;
     }
@@ -167,20 +220,20 @@ export const BadgeProvider = ({ children }: { children: ReactNode }) => {
     const diff = Date.now() - parseInt(ts, 10);
     const oneHour = 60 * 60 * 1000;
     if (!Number.isFinite(diff) || diff > oneHour) {
-      await AsyncStorage.multiRemove([BADGE_KEY, BADGE_TIMESTAMP_KEY, PETUGAS_INFO_KEY]);
+      await AsyncStorage.multiRemove([BADGE_KEY, BADGE_TIMESTAMP_KEY, PETUGAS_INFO_KEY, EMPLOYEE_INFO_KEY]);
       setBadge('');
       setPetugasInfo(null);
+      setEmployeeInfo(null);
       setShowModal(true);
       return;
     }
 
     setBadge(b);
-    if (infoStr) {
-      try {
-        setPetugasInfo(JSON.parse(infoStr));
-      } catch {
-        setPetugasInfo(null);
-      }
+    if (petStr) {
+      try { setPetugasInfo(JSON.parse(petStr)); } catch { setPetugasInfo(null); }
+    }
+    if (empStr) {
+      try { setEmployeeInfo(JSON.parse(empStr)); } catch { setEmployeeInfo(null); }
     }
   }, []);
 
@@ -200,97 +253,119 @@ export const BadgeProvider = ({ children }: { children: ReactNode }) => {
     return () => clearInterval(interval);
   }, [checkBadgeValidity]);
 
-  /** Validasi ke backend: TIDAK boleh login saat offline */
-  const validateBadgeWithServer = useCallback(async (badge: string): Promise<PetugasInfo | null> => {
+  // ---- VALIDASI: Employee → Petugas ----
+  const validateBadgeWithServer = useCallback(async (badge: string) => {
+    setValidating(true);
     try {
-      setValidating(true);
-      const res = await safeFetchOffline(
-        `${baseUrl}/api/petugas/lokasi/${encodeURIComponent(badge)}`,
-        { method: 'GET' }
+      // 1) Employee by badge (endpoint baru pasti)
+      const empResp = await getJson(
+        `${baseUrl}/api/employee/by-badge/${encodeURIComponent(badge)}`
       );
+      if (empResp.offline) {
+        Alert.alert('Gagal Verifikasi', 'Tidak ada koneksi. Validasi badge membutuhkan internet.');
+        return { emp: null, pet: null } as const;
+      }
+      if (empResp.res.status === 404) {
+        Alert.alert('Badge Tidak Terdaftar', 'Badge tidak ditemukan di Employee.');
+        return { emp: null, pet: null } as const;
+      }
+      if (!empResp.res.ok || !empResp.json) {
+        Alert.alert('Gagal Verifikasi', `Server mengembalikan status ${empResp.res.status}.`);
+        return { emp: null, pet: null } as const;
+      }
+      const emp = toEmployeeInfo(badge, empResp.json);
 
-      const json = await res.json().catch(() => null);
+      // 2) Petugas (opsional)
+      const petResp = await getJson(
+        `${baseUrl}/api/petugas/lokasi/${encodeURIComponent(badge)}`
+      );
+      if (petResp.offline) {
+        Alert.alert('Gagal Verifikasi', 'Server sedang bermasalah atau offline. Coba lagi nanti.');
+        return { emp, pet: null } as const;
+      }
 
-      // offline/network/server-5xx → larang login baru
-      if (json && (json as any).offline) {
-        Alert.alert(
-          'Gagal Verifikasi',
-          (json as any).reason === 'server-5xx'
-            ? 'Server sedang bermasalah. Coba lagi nanti.'
-            : 'Tidak ada koneksi. Pastikan internet aktif untuk verifikasi badge.'
+      if (petResp.res.ok && petResp.json) {
+        const rawIntervalId =
+          petResp.json?.IntervalPetugasId ?? petResp.json?.intervalPetugasId ??
+          petResp.json?.petugas?.IntervalPetugasId ?? null;
+        const intervalDetail = await fetchIntervalDetailIfNeeded(
+          rawIntervalId ? Number(rawIntervalId) : null
         );
-        return null;
+        const pet = toPetugasInfo(badge, petResp.json, intervalDetail);
+        return { emp, pet } as const;
       }
 
-      if (res.status === 404 || res.status === 400) {
-        Alert.alert('Badge Tidak Terdaftar', 'Silakan periksa kembali badge number Anda.');
-        return null;
-      }
-      if (!res.ok || !json) {
-        Alert.alert('Gagal Verifikasi', `Server mengembalikan status ${res.status}.`);
-        return null;
-      }
-
-      // Ambil detail interval jika belum lengkap
-      const rawIntervalId =
-        json?.IntervalPetugasId ?? json?.intervalPetugasId ?? json?.petugas?.IntervalPetugasId ?? null;
-      const intervalDetail = await fetchIntervalDetailIfNeeded(
-        rawIntervalId ? Number(rawIntervalId) : null
-      );
-
-      return toPetugasInfo(badge, json, intervalDetail);
+      // Tidak ada di petugas → employee-only
+      return { emp, pet: null } as const;
     } catch (e: any) {
       Alert.alert('Gagal Verifikasi', e?.message || 'Terjadi kesalahan jaringan.');
-      return null;
+      return { emp: null, pet: null } as const;
     } finally {
       setValidating(false);
     }
-  }, [fetchIntervalDetailIfNeeded, toPetugasInfo]);
+  }, [fetchIntervalDetailIfNeeded, getJson, toEmployeeInfo, toPetugasInfo]);
 
-  /** Set badge + cache info */
+  // ---- Set badge + cache ----
   const setBadgeNumber = useCallback(async (b: string) => {
-    const info = await validateBadgeWithServer(b);
-    if (!info) return;
+    const { emp, pet } = await validateBadgeWithServer(b);
+    if (!emp && !pet) return; // tolak login
 
     const now = Date.now().toString();
-    await AsyncStorage.multiSet([
+    const kv: [string, string][] = [
       [BADGE_KEY, b],
       [BADGE_TIMESTAMP_KEY, now],
-      [PETUGAS_INFO_KEY, JSON.stringify(info)],
-    ]);
+      [EMPLOYEE_INFO_KEY, emp ? JSON.stringify(emp) : ''],
+      [PETUGAS_INFO_KEY, pet ? JSON.stringify(pet) : ''],
+    ];
+    await AsyncStorage.multiSet(kv);
 
     setBadge(b);
-    setPetugasInfo(info);
+    setEmployeeInfo(emp ?? null);
+    setPetugasInfo(pet ?? null);
     setShowModal(false);
   }, [validateBadgeWithServer]);
 
-  /** Clear badge (logout) */
+  // ---- Clear badge (logout) ----
   const clearBadgeNumber = useCallback(async () => {
-    // bersihkan juga flag preload per badge
     try {
       if (badgeNumber) {
         const flagKey = `PRELOAD_FULL_FOR_${badgeNumber}`;
         await AsyncStorage.removeItem(flagKey);
       }
     } catch {}
-
-    await AsyncStorage.multiRemove([BADGE_KEY, BADGE_TIMESTAMP_KEY, PETUGAS_INFO_KEY]);
+    await AsyncStorage.multiRemove([
+      BADGE_KEY,
+      BADGE_TIMESTAMP_KEY,
+      PETUGAS_INFO_KEY,
+      EMPLOYEE_INFO_KEY,
+    ]);
     setBadge('');
     setPetugasInfo(null);
+    setEmployeeInfo(null);
     setShowModal(true);
   }, [badgeNumber]);
 
-  /** Rescue atau punya lokasi → offline capable */
+  // ---- Derivatives ----
+  const isEmployeeOnly = useMemo(() => !!(!petugasInfo && employeeInfo), [petugasInfo, employeeInfo]);
   const offlineCapable = useMemo(() => {
-    const hasLokasi = !!petugasInfo?.lokasiId;
-    return isRescue(petugasInfo?.role) || hasLokasi;
+    if (!petugasInfo) return false;
+    const hasLokasi = !!petugasInfo.lokasiId;
+    return isRescue(petugasInfo.role) || hasLokasi;
   }, [petugasInfo]);
 
   if (!ready) return null;
 
   return (
     <BadgeContext.Provider
-      value={{ badgeNumber, setBadgeNumber, clearBadgeNumber, petugasInfo, offlineCapable }}
+      value={{
+        badgeNumber,
+        setBadgeNumber,
+        clearBadgeNumber,
+        petugasInfo,
+        employeeInfo,
+        isEmployeeOnly,
+        offlineCapable,
+      }}
     >
       {children}
       {showModal && <BadgeModal onSave={setBadgeNumber} loading={validating} />}
@@ -298,7 +373,7 @@ export const BadgeProvider = ({ children }: { children: ReactNode }) => {
   );
 };
 
-/** ====== Styles ====== */
+// ===== Styles =====
 const styles = StyleSheet.create({
   overlay: {
     flex: 1,

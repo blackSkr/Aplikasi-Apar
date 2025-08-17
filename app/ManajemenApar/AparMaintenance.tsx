@@ -22,6 +22,11 @@ import { useBadge } from '@/context/BadgeContext';
 import { useOfflineQueue } from '@/hooks/useOfflineQueue';
 import { flushQueue, safeFetchOffline } from '@/utils/ManajemenOffline';
 import { useLayoutEffect } from 'react';
+import {
+  DETAIL_ID_PREFIX,
+  DETAIL_TOKEN_PREFIX,
+  touchDetailKey,
+} from '@/src/cacheTTL';
 
 type ChecklistItemState = {
   checklistId?: number;
@@ -53,8 +58,7 @@ function normalizeApar(raw: any): AparData {
     raw?.defaultIntervalBulan ?? raw?.IntervalPemeriksaanBulan ?? 0
   );
   const namaInt = raw?.namaIntervalPetugas ?? raw?.NamaInterval ?? undefined;
-  const blnInt =
-    raw?.bulanIntervalPetugas ?? raw?.IntervalBulan ?? undefined;
+  const blnInt = raw?.bulanIntervalPetugas ?? raw?.IntervalBulan ?? undefined;
   const nextDue = raw?.nextDueDate ?? raw?.next_due_date ?? null;
 
   // checklist bisa berupa string JSON / array sudah jadi
@@ -78,7 +82,6 @@ function normalizeApar(raw: any): AparData {
 }
 
 export default function AparMaintenance() {
-  
   const navigation = useNavigation();
   useLayoutEffect(() => {
     navigation.setOptions({ title: 'Inspeksi Alat' });
@@ -86,7 +89,7 @@ export default function AparMaintenance() {
 
   const route = useRoute();
   const { badgeNumber } = useBadge();
-  const { count: queueCount, refreshQueue } = useOfflineQueue();
+  const { refreshQueue } = useOfflineQueue();
 
   const params = (route.params as any) || {};
   const keyParam = params.id
@@ -149,6 +152,85 @@ export default function AparMaintenance() {
     }
   };
 
+  // Simpan cache konsisten + back-compat
+  const persistDetailCache = async (json: any) => {
+    const apar = normalizeApar(json);
+    const idStr = String(apar.id_apar);
+
+    const routeParams: any = route.params || {};
+    const tokenStr =
+      routeParams.token ||
+      json?.TokenQR ||
+      json?.token ||
+      json?.Token ||
+      null;
+
+    const pairs: [string, string][] = [
+      // key standar by ID
+      [`${DETAIL_ID_PREFIX}${idStr}`, JSON.stringify(json)],
+      // key lama (back-compat)
+      [`APAR_DETAIL_${keyParam}`, JSON.stringify(json)],
+    ];
+
+    if (tokenStr) {
+      pairs.push(
+        // key standar by TOKEN
+        [`${DETAIL_TOKEN_PREFIX}${tokenStr}`, JSON.stringify(json)],
+        // mapping token -> id
+        [`APAR_TOKEN_${tokenStr}`, idStr]
+      );
+    }
+
+    await AsyncStorage.multiSet(pairs);
+    // sentuh TTL index untuk semua detail key
+    await touchDetailKey(`${DETAIL_ID_PREFIX}${idStr}`);
+    if (tokenStr) await touchDetailKey(`${DETAIL_TOKEN_PREFIX}${tokenStr}`);
+    await touchDetailKey(`APAR_DETAIL_${keyParam}`);
+  };
+
+  // Load cache konsisten dari token atau id (dengan fallback)
+  const loadDetailFromCache = async (): Promise<any | null> => {
+    const isToken = keyParam.startsWith('token=');
+    const rawToken = isToken ? decodeURIComponent(keyParam.slice('token='.length)) : null;
+    const rawId = !isToken ? decodeURIComponent(keyParam.slice('id='.length)) : null;
+
+    // 1) kalau token → coba token key standar
+    if (isToken && rawToken) {
+      const v = await AsyncStorage.getItem(`${DETAIL_TOKEN_PREFIX}${rawToken}`);
+      if (v) {
+        await touchDetailKey(`${DETAIL_TOKEN_PREFIX}${rawToken}`);
+        return JSON.parse(v);
+      }
+      // 1b) kalau ada mapping token->id → ambil by id
+      const mappedId = await AsyncStorage.getItem(`APAR_TOKEN_${rawToken}`);
+      if (mappedId) {
+        const v2 = await AsyncStorage.getItem(`${DETAIL_ID_PREFIX}${mappedId}`);
+        if (v2) {
+          await touchDetailKey(`${DETAIL_ID_PREFIX}${mappedId}`);
+          return JSON.parse(v2);
+        }
+      }
+    }
+
+    // 2) kalau by id → coba id key standar
+    if (!isToken && rawId) {
+      const v = await AsyncStorage.getItem(`${DETAIL_ID_PREFIX}${rawId}`);
+      if (v) {
+        await touchDetailKey(`${DETAIL_ID_PREFIX}${rawId}`);
+        return JSON.parse(v);
+      }
+    }
+
+    // 3) fallback: key lama (back-compat)
+    const legacy = await AsyncStorage.getItem(`APAR_DETAIL_${keyParam}`);
+    if (legacy) {
+      await touchDetailKey(`APAR_DETAIL_${keyParam}`);
+      return JSON.parse(legacy);
+    }
+
+    return null;
+  };
+
   // fetch or cache
   useEffect(() => {
     (async () => {
@@ -167,24 +249,39 @@ export default function AparMaintenance() {
       try {
         if (__DEV__) console.log('[AparMaintenance] GET', path);
         const res = await safeFetchOffline(path, { method: 'GET' });
-        const text = await res.text();
+
+        // Jika safeFetchOffline memberi offline-response (network), res.ok bisa true tapi berisi {offline:true}
+        let asText = '';
+        try { asText = await res.text(); } catch {}
         let json: any = null;
-        try { json = text ? JSON.parse(text) : null; } catch {}
+        try { json = asText ? JSON.parse(asText) : null; } catch {}
 
-        if (json && json.offline) throw new Error('Offline fallback');
-        if (!res.ok) {
-          const msg = (json && json.message) ? json.message : `HTTP ${res.status}`;
-          throw new Error(msg);
+        if (json && json.offline) {
+          // OFFLINE → muat dari cache konsisten
+          const cached = await loadDetailFromCache();
+          if (cached) {
+            initApar(cached, 'cache');
+            Alert.alert('Offline/Cache', 'Menampilkan data dari cache.');
+          } else {
+            throw new Error('Offline dan detail belum tersimpan di perangkat.');
+          }
+        } else {
+          // ONLINE → validasi response normal
+          if (!res.ok) {
+            const msg = (json && json.message) ? json.message : `HTTP ${res.status}`;
+            throw new Error(msg);
+          }
+          if (!json || typeof json !== 'object') throw new Error('Data tidak valid');
+
+          initApar(json, 'online');
+          await persistDetailCache(json);
         }
-        if (!json || typeof json !== 'object') throw new Error('Data tidak valid');
-
-        initApar(json, 'online');
-        await AsyncStorage.setItem(`APAR_DETAIL_${keyParam}`, JSON.stringify(json));
       } catch (err: any) {
         if (__DEV__) console.warn('[AparMaintenance] fetch failed:', err?.message);
-        const cached = await AsyncStorage.getItem(`APAR_DETAIL_${keyParam}`);
+        // Fallback terakhir: coba legacy cache juga
+        const cached = await loadDetailFromCache();
         if (cached) {
-          initApar(JSON.parse(cached), 'cache');
+          initApar(cached, 'cache');
           Alert.alert('Offline/Cache', 'Menampilkan data dari cache.');
         } else {
           Alert.alert('Error', 'Gagal mengambil data: ' + (err?.message || 'Tidak diketahui'));
@@ -255,16 +352,20 @@ export default function AparMaintenance() {
     try {
       const path = '/api/perawatan/submit';
       const res = await safeFetchOffline(path, { method: 'POST', body: formData });
-      const json = await res.json();
+      const jsonText = await res.text();
+      let json: any = null;
+      try { json = jsonText ? JSON.parse(jsonText) : null; } catch {}
 
-      if ((json as any).offline) {
+      if ((json as any)?.offline) {
         Alert.alert('📴 Offline', 'Data disimpan sementara dan akan dikirim saat online.', [
           { text: 'OK', onPress: () => navigation.goBack() },
         ]);
-      } else {
+      } else if (res.ok) {
         Alert.alert('✅ Sukses', 'Maintenance berhasil dikirim.', [
           { text: 'OK', onPress: () => navigation.goBack() },
         ]);
+      } else {
+        throw new Error((json && json.message) || `HTTP ${res.status}`);
       }
     } catch (err: any) {
       Alert.alert('Error','Terjadi kesalahan: ' + err.message);
@@ -401,8 +502,9 @@ const Input = styled(TextInput).attrs({
   padding: 12px;
   border-radius: 6px;
   margin-bottom: 12px;
-  color: #111827; /* Teks jadi terlihat di background putih */
-`;const QuestionText = styled(Text)` font-size: 15px; font-weight: 500; color: #374151; margin-bottom: 8px; `;
+  color: #111827;
+`;
+const QuestionText = styled(Text)` font-size: 15px; font-weight: 500; color: #374151; margin-bottom: 8px; `;
 const ButtonRow = styled(View)` flex-direction: row; margin-bottom: 12px; justify-content: space-between; `;
 const Toggle = styled(Pressable)<{ active: boolean }>` flex: 1; background-color: ${({ active }) => (active ? '#dc2626' : '#f3f4f6')}; padding: 12px; border-radius: 6px; align-items: center; margin-horizontal: 4px; border-width: 1px; border-color: ${({ active }) => (active ? '#dc2626' : '#d1d5db')}; `;
 const ToggleText = styled(Text)<{ active: boolean }>` color: ${({ active }) => (active ? '#fff' : '#6b7280')}; font-weight: 600; font-size: 14px; `;

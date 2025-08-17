@@ -53,3 +53,7 @@ export async function purgeStaleDetails(ttlDays = DEFAULT_TTL_DAYS): Promise<num
   }
   return toDelete.length;
 }
+
+/** Helper opsional agar rapi saat generate key */
+export const detailKeyById    = (id: string|number) => `${DETAIL_ID_PREFIX}${id}`;
+export const detailKeyByToken = (token: string)      => `${DETAIL_TOKEN_PREFIX}${token}`;

@@ -1,7 +1,7 @@
 // app/(tabs)/ScanQr.tsx
 import Colors from '@/constants/Colors';
 import { useBadge } from '@/context/BadgeContext';
-import { DETAIL_TOKEN_PREFIX } from '@/src/cacheTTL';
+import { DETAIL_ID_PREFIX, DETAIL_TOKEN_PREFIX } from '@/src/cacheTTL';
 import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import NetInfo from '@react-native-community/netinfo';
@@ -74,9 +74,34 @@ const ScanQr: React.FC = () => {
   const checkLocalDetail = useCallback(async (token: string) => {
     setCheckingCache(true);
     try {
-      const key = `${DETAIL_TOKEN_PREFIX}${encodeURIComponent(token)}`;
-      const cached = await AsyncStorage.getItem(key);
-      setHasLocalDetail(!!cached);
+      // cek key standar by token
+      const k1 = `${DETAIL_TOKEN_PREFIX}${token}`;
+      const v1 = await AsyncStorage.getItem(k1);
+      if (v1) {
+        setHasLocalDetail(true);
+        return;
+      }
+
+      // beberapa versi lama pakai encodeURIComponent; cek juga
+      const k1b = `${DETAIL_TOKEN_PREFIX}${encodeURIComponent(token)}`;
+      const v1b = await AsyncStorage.getItem(k1b);
+      if (v1b) {
+        setHasLocalDetail(true);
+        return;
+      }
+
+      // cek mapping token -> id lalu cek detail by id
+      const mappedId = await AsyncStorage.getItem(`APAR_TOKEN_${token}`);
+      if (mappedId) {
+        const k2 = `${DETAIL_ID_PREFIX}${mappedId}`;
+        const v2 = await AsyncStorage.getItem(k2);
+        if (v2) {
+          setHasLocalDetail(true);
+          return;
+        }
+      }
+
+      setHasLocalDetail(false);
     } finally {
       setCheckingCache(false);
     }
@@ -112,6 +137,7 @@ const ScanQr: React.FC = () => {
         return;
       }
       if (!hasLocalDetail && !ALLOW_NAV_WITHOUT_CACHE_WHEN_OFFLINE) {
+        // coba mapping token → id agar tetap bisa pakai param id saat offline
         const id = await AsyncStorage.getItem(`APAR_TOKEN_${qrToken}`);
         if (id) {
           router.push({ pathname: '/ManajemenApar/AparMaintenance', params: { id } });
@@ -122,6 +148,7 @@ const ScanQr: React.FC = () => {
       }
     }
 
+    // default: navigasi by token (akan di-handle AparMaintenance)
     router.push({ pathname: '/ManajemenApar/AparMaintenance', params: { token: qrToken } });
   };
 

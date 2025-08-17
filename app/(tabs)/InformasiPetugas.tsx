@@ -1,8 +1,7 @@
-// src/pages/InformasiAlat.tsx
+// app/(tabs)/InformasiPetugas.tsx
 import { IconSymbol } from '@/components/ui/IconSymbol';
 import { useBadge } from '@/context/BadgeContext';
 import { useAparList } from '@/hooks/useAparList';
-import { useRouter } from 'expo-router';
 import React, { useState } from 'react';
 import {
   ActivityIndicator,
@@ -100,9 +99,8 @@ const LoadingContainer = styled.View` flex: 1; align-items: center; justify-cont
 const LoadingText = styled.Text` color: ${Colors.textSecondary}; font-size: 16px; margin-top: 12px; `;
 
 export default function InformasiAlat() {
-  const router = useRouter();
   const { loading, list, refresh } = useAparList();
-  const { badgeNumber } = useBadge();
+  const { badgeNumber, petugasInfo, offlineCapable } = useBadge();
   const [refreshing, setRefreshing] = useState(false);
 
   const handleRefresh = async () => {
@@ -133,10 +131,6 @@ export default function InformasiAlat() {
   const getCompletedDate = (item: any) =>
     item.last_inspection || item.tanggal_selesai || null;
 
-  // Logika statistik:
-  // - Sudah maintenance bulan ini: punya completedDate di bulan ini
-  // - Perlu maintenance bulan ini: nextDueDate TIDAK ADA atau < awal bulan depan (due/overdue),
-  //   dan BELUM ada completedDate di bulan ini.
   const sudahMaintenanceBulanIni = list.filter(i => inThisMonth(getCompletedDate(i))).length;
 
   const perluMaintenanceBulanIni = list.filter(i => {
@@ -144,10 +138,7 @@ export default function InformasiAlat() {
     if (completedInMonth) return false;
 
     const due = parseOrNull(i.nextDueDate);
-    // tidak ada nextDueDate -> dianggap perlu
     if (!due) return true;
-
-    // due sebelum awal bulan depan -> jatuh tempo bulan ini atau overdue
     return due < startNextMonth;
   }).length;
 
@@ -157,14 +148,12 @@ export default function InformasiAlat() {
     perluMaintenanceBulanIni,
   };
 
-  const petugasLokasi = list.length > 0 ? list[0].lokasi_apar : 'Tidak ada data';
-
-  const actions = [
-    { title: 'Lihat Semua APAR', subtitle: 'Daftar lengkap alat', icon: 'list.bullet', bgColor: Colors.primary, route: '/ManajemenApar/AparView' },
-    { title: 'Maintenance', subtitle: 'Kelola perawatan', icon: 'wrench.fill', bgColor: Colors.warning, route: '/ManajemenApar/AparMaintenance' },
-    { title: 'Tambah APAR', subtitle: 'Daftarkan alat baru', icon: 'plus.circle.fill', bgColor: Colors.success, route: '/apar/CreateApar' },
-    { title: 'Laporan', subtitle: 'Lihat statistik', icon: 'chart.bar.fill', bgColor: Colors.secondary, route: '/laporan/LaporanApar' },
-  ];
+  const petugasLokasi = petugasInfo?.lokasiNama || (list.length > 0 ? list[0].lokasi_apar : 'Tidak ada data');
+  const petugasRole = petugasInfo?.role || '—';
+  const petugasInterval =
+    petugasInfo?.intervalNama
+      ? `${petugasInfo.intervalNama} (${petugasInfo.intervalBulan ?? '-'} bln)`
+      : (petugasInfo?.intervalBulan ? `${petugasInfo.intervalBulan} bulan` : '—');
 
   if (loading && !refreshing) {
     return (
@@ -217,14 +206,33 @@ export default function InformasiAlat() {
             <PetugasValue>{badgeNumber || 'Tidak login'}</PetugasValue>
           </PetugasRow>
 
+          <PetugasRow key="role-row">
+            <PetugasLabel>Role:</PetugasLabel>
+            <PetugasValue>{petugasRole}</PetugasValue>
+          </PetugasRow>
+
           <PetugasRow key="lokasi-row">
             <PetugasLabel>Lokasi Kerja:</PetugasLabel>
             <PetugasValue>{petugasLokasi}</PetugasValue>
           </PetugasRow>
 
-          <PetugasRow key="total-row" style={{ borderBottomWidth: 0 }}>
-            <PetugasLabel>Total APAR:</PetugasLabel>
-            <PetugasValue>{stats.totalAlat} unit</PetugasValue>
+          <PetugasRow key="interval-row" style={{ borderBottomWidth: 0 }}>
+            <PetugasLabel>Interval Petugas:</PetugasLabel>
+            <PetugasValue>{petugasInterval}</PetugasValue>
+          </PetugasRow>
+        </PetugasCard>
+
+        {/* Status Offline Capability */}
+        <PetugasCard style={{ borderLeftColor: offlineCapable ? Colors.success : Colors.warning }}>
+          <PetugasHeader>
+            <IconSymbol name={offlineCapable ? 'wifi' : 'wifi.exclamationmark'} size={24} color={offlineCapable ? Colors.success : Colors.warning} />
+            <PetugasTitle>{offlineCapable ? 'Offline-ready' : 'Mode Online-only'}</PetugasTitle>
+          </PetugasHeader>
+          <PetugasRow style={{ borderBottomWidth: 0 }}>
+            <PetugasLabel>Keterangan:</PetugasLabel>
+            <PetugasValue>
+              {offlineCapable ? 'Bisa preload & kirim saat online kembali' : 'Tidak rescue & tidak terikat lokasi'}
+            </PetugasValue>
           </PetugasRow>
         </PetugasCard>
 
@@ -276,22 +284,6 @@ export default function InformasiAlat() {
             </StatCard>
           </StatsGrid>
         </StatsContainer>
-
-        {/* Aksi Cepat (opsional) */}
-        {/* <ActionsContainer>
-          <SectionTitle>Aksi Cepat</SectionTitle>
-          <ActionsGrid>
-            {actions.map((action, index) => (
-              <ActionCard key={index} onPress={() => router.push(action.route as any)} android_ripple={{ color: Colors.border }}>
-                <ActionIcon bgColor={`${action.bgColor}20`}>
-                  <IconSymbol name={action.icon} size={28} color={action.bgColor} />
-                </ActionIcon>
-                <ActionTitle>{action.title}</ActionTitle>
-                <ActionSubtitle>{action.subtitle}</ActionSubtitle>
-              </ActionCard>
-            ))}
-          </ActionsGrid>
-        </ActionsContainer> */}
 
         <View style={{ height: 20 }} />
       </Content>

@@ -7,59 +7,83 @@ import { Platform } from 'react-native';
 const expoCfg: any = Constants.expoConfig ?? (Constants as any).manifest ?? {};
 const extra: any = expoCfg.extra ?? {};
 
-// 1) Env / Extra (prioritas tertinggi)
-const envUrl =
-  process.env.EXPO_PUBLIC_API_URL ||
-  extra.EXPO_PUBLIC_API_URL ||
-  extra.stagApiUrl ||
-  extra.localApiUrl ||
-  extra.devApiUrl ||
-  'http://172.16.34.189:3000'; // fallback terakhir = kantor
+// Flag: kita lagi di Android emulator?
+const isAndroidEmu = __DEV__ && Platform.OS === 'android' && !Device.isDevice;
 
-// 2) Tentukan rawUrl + sumber
-let rawUrl = envUrl;
-let source: 'env' | 'stag' | 'local' | 'dev' | 'fallback' = 'env';
-if (!process.env.EXPO_PUBLIC_API_URL && extra.EXPO_PUBLIC_API_URL) source = 'env';
-else if (!extra.EXPO_PUBLIC_API_URL && extra.stagApiUrl && envUrl === extra.stagApiUrl) source = 'stag';
-else if (!extra.EXPO_PUBLIC_API_URL && extra.localApiUrl && envUrl === extra.localApiUrl) source = 'local';
-else if (!extra.EXPO_PUBLIC_API_URL && extra.devApiUrl && envUrl === extra.devApiUrl) source = 'dev';
-if (!rawUrl) { rawUrl = 'http://172.16.34.189:3000'; source = 'fallback'; }
+// --- Kandidat URL ---
+// Urutan prioritas disesuaikan: di emulator Android, utamakan dev/local terlebih dulu.
+const candidatesEmu = [
+  process.env.EXPO_PUBLIC_API_URL,         // kalau dev nyetel env → hormati, tapi akan di-map ke 10.0.2.2
+  extra.devApiUrl,                         // ex: http://localhost:3000
+  'http://10.0.2.2:3000',                  // fallback emulator Android
+  extra.localApiUrl,                       // ex: http://192.168.1.3:3000
+  extra.stagApiUrl,                        // kantor
+];
 
-// 3) Parse URL
+const candidatesDeviceOrWeb = [
+  process.env.EXPO_PUBLIC_API_URL,         // env (EAS/CI/Runtime)
+  extra.EXPO_PUBLIC_API_URL,               // app.json → extra.EXPO_PUBLIC_API_URL
+  extra.stagApiUrl,                        // kantor
+  extra.localApiUrl,                       // LAN
+  extra.devApiUrl,                         // localhost (untuk web/ios)
+  'http://172.16.34.189:3000',             // fallback kantor
+];
+
+// Pilih base raw URL
+let rawUrl = (isAndroidEmu ? candidatesEmu : candidatesDeviceOrWeb).find(Boolean) as string | undefined;
+if (!rawUrl) rawUrl = 'http://172.16.34.189:3000'; // default terakhir
+
+// Parse URL awal
 let protocol = 'http:';
 let hostname = '172.16.34.189';
 let port = '3000';
 try {
   const u = new URL(rawUrl);
   protocol = u.protocol || 'http:';
-  hostname = u.hostname || '172.16.34.189';
+  hostname = u.hostname || hostname;
   port = u.port || (protocol === 'https:' ? '443' : '3000');
-} catch { /* keep defaults */ }
+} catch {
+  // keep defaults
+}
 
-// 4) Mapping khusus emulator Android hanya jika host = localhost/127.0.0.1
+// Mapping khusus emulator Android:
+// - Jika host localhost/127.* → 10.0.2.2
+// - Kalau host LAN (192.168.* / 10.* / 172.*) juga kita paksa 10.0.2.2 biar selalu ke mesin host
 let host = hostname;
-if (__DEV__ && Platform.OS === 'android' && !Device.isDevice) {
-  if (hostname === 'localhost' || hostname === '127.0.0.1') {
-    host = '10.0.2.2'; // Genymotion = 10.0.3.2
+if (isAndroidEmu) {
+  const hn = (hostname || '').toLowerCase();
+  const isLocalhost = hn === 'localhost' || hn === '127.0.0.1';
+  const isLan =
+    hn.startsWith('192.168.') ||
+    hn.startsWith('10.') ||
+    hn.startsWith('172.');
+
+  if (isLocalhost || isLan) {
+    host = '10.0.2.2';
   }
 }
 
-// ⚠️ Dihapus: hard-guard yang dulu memaksa 172.* kembali ke localApiUrl.
-// (Supaya IP kantor 172.16.34.189 tetap dipakai di HP fisik.)
-
+// Port part
 const portPart = port ? `:${port}` : '';
 export const baseUrl = `${protocol}//${host}${portPart}`;
 
+// Debug info
 export const __CONFIG_DEBUG__ = {
   baseUrl,
   rawUrl,
-  source,
+  source: isAndroidEmu ? 'emu_prefer_dev' : 'env_or_extra',
+  emulator: isAndroidEmu,
+  device: Device.isDevice,
+  platform: Platform.OS,
   extra: {
     EXPO_PUBLIC_API_URL: extra.EXPO_PUBLIC_API_URL,
     stagApiUrl: extra.stagApiUrl,
     localApiUrl: extra.localApiUrl,
-    devApiUrl: extra.devApiUrl
-  }
+    devApiUrl: extra.devApiUrl,
+  },
+  env: {
+    EXPO_PUBLIC_API_URL: process.env.EXPO_PUBLIC_API_URL,
+  },
 };
 
 export function logApiConfig(tag = 'config') {

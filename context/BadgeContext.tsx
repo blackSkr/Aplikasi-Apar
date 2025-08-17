@@ -2,8 +2,10 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import React, {
   createContext,
   ReactNode,
+  useCallback,
   useContext,
   useEffect,
+  useMemo,
   useState,
 } from 'react';
 import {
@@ -21,26 +23,32 @@ import {
 } from 'react-native';
 
 import { baseUrl } from '@/src/config';
+import { isRescue, PetugasInfo } from '@/src/types/petugas';
 import { safeFetchOffline } from '@/utils/ManajemenOffline';
 
 const BADGE_KEY = 'BADGE_NUMBER';
 const BADGE_TIMESTAMP_KEY = 'BADGE_TIMESTAMP';
-// opsional: simpan info petugas
 const PETUGAS_INFO_KEY = 'PETUGAS_INFO';
 
 interface BadgeContextValue {
   badgeNumber: string;
+  petugasInfo: PetugasInfo | null;
+  offlineCapable: boolean; // rescue ATAU punya lokasi
   setBadgeNumber: (b: string) => Promise<void>;
   clearBadgeNumber: () => Promise<void>;
 }
+
 const BadgeContext = createContext<BadgeContextValue>({
   badgeNumber: '',
+  petugasInfo: null,
+  offlineCapable: false,
   setBadgeNumber: async () => {},
   clearBadgeNumber: async () => {},
 });
 
 export const useBadge = () => useContext(BadgeContext);
 
+/** ====== UI Modal Input Badge ====== */
 function BadgeModal({
   onSave,
   loading,
@@ -68,6 +76,10 @@ function BadgeModal({
             autoCapitalize="characters"
             placeholderTextColor="#aaa"
             editable={!loading}
+            onSubmitEditing={() => {
+              const trimmed = input.trim();
+              if (trimmed) onSave(trimmed);
+            }}
           />
           <Pressable
             style={[styles.button, loading && { opacity: 0.7 }]}
@@ -89,51 +101,107 @@ function BadgeModal({
   );
 }
 
+/** ====== Provider ====== */
 export const BadgeProvider = ({ children }: { children: ReactNode }) => {
   const [badgeNumber, setBadge] = useState('');
+  const [petugasInfo, setPetugasInfo] = useState<PetugasInfo | null>(null);
   const [showModal, setShowModal] = useState(false);
   const [ready, setReady] = useState(false);
   const [validating, setValidating] = useState(false);
 
-  const checkBadgeValidity = async () => {
-    const stored = await AsyncStorage.getItem(BADGE_KEY);
-    const timestamp = await AsyncStorage.getItem(BADGE_TIMESTAMP_KEY);
+  /** Normalisasi respons server menjadi PetugasInfo */
+  const toPetugasInfo = useCallback((badge: string, raw: any, intervalDetail?: any): PetugasInfo => {
+    const role =
+      raw?.Role ?? raw?.role ?? raw?.petugas?.Role ?? raw?.petugas?.role ?? null;
+    const lokasiId =
+      raw?.LokasiId ?? raw?.lokasiId ?? raw?.petugas?.LokasiId ?? raw?.lokasi?.Id ?? null;
+    const lokasiNama =
+      raw?.LokasiNama ?? raw?.lokasiNama ?? raw?.lokasi?.Nama ?? null;
+    const intervalId =
+      raw?.IntervalPetugasId ?? raw?.intervalPetugasId ?? raw?.petugas?.IntervalPetugasId ?? null;
 
-    if (!stored || !timestamp) {
+    const intervalNama =
+      raw?.IntervalNama ?? raw?.intervalNama ?? intervalDetail?.NamaInterval ?? intervalDetail?.namaInterval ?? null;
+    const intervalBulanNum =
+      raw?.IntervalBulan ?? raw?.intervalBulan ?? intervalDetail?.Bulan ?? intervalDetail?.bulan ?? null;
+
+    return {
+      badge,
+      role: role ?? null,
+      lokasiId: lokasiId != null ? Number(lokasiId) : null,
+      lokasiNama: lokasiNama ?? null,
+      intervalId: intervalId != null ? Number(intervalId) : null,
+      intervalNama: intervalNama ?? null,
+      intervalBulan: intervalBulanNum != null ? Number(intervalBulanNum) : null,
+    };
+  }, []);
+
+  const fetchIntervalDetailIfNeeded = useCallback(async (intervalId?: number | null) => {
+    if (!intervalId) return null;
+    try {
+      const res = await safeFetchOffline(
+        `${baseUrl}/api/interval-petugas/${encodeURIComponent(String(intervalId))}`,
+        { method: 'GET' }
+      );
+      const json = await res.json().catch(() => null);
+      if (json && !json.offline && res.ok) return json;
+    } catch {}
+    return null;
+  }, []);
+
+  /** Cek cache badge+info (TTL 1 jam) */
+  const checkBadgeValidity = useCallback(async () => {
+    const [[, b], [, ts], [, infoStr]] = await AsyncStorage.multiGet([
+      BADGE_KEY,
+      BADGE_TIMESTAMP_KEY,
+      PETUGAS_INFO_KEY,
+    ]);
+
+    if (!b || !ts) {
       setBadge('');
+      setPetugasInfo(null);
       setShowModal(true);
       return;
     }
 
-    const diff = Date.now() - parseInt(timestamp, 10);
-    const oneHour = 60 * 60 * 1000; // cache 1 jam
-    if (diff > oneHour) {
+    const diff = Date.now() - parseInt(ts, 10);
+    const oneHour = 60 * 60 * 1000;
+    if (!Number.isFinite(diff) || diff > oneHour) {
       await AsyncStorage.multiRemove([BADGE_KEY, BADGE_TIMESTAMP_KEY, PETUGAS_INFO_KEY]);
       setBadge('');
+      setPetugasInfo(null);
       setShowModal(true);
-    } else {
-      setBadge(stored);
+      return;
     }
-  };
+
+    setBadge(b);
+    if (infoStr) {
+      try {
+        setPetugasInfo(JSON.parse(infoStr));
+      } catch {
+        setPetugasInfo(null);
+      }
+    }
+  }, []);
 
   useEffect(() => {
     checkBadgeValidity().then(() => setReady(true));
-  }, []);
+  }, [checkBadgeValidity]);
 
   useEffect(() => {
     const sub = AppState.addEventListener('change', (status: AppStateStatus) => {
       if (status === 'active') checkBadgeValidity();
     });
     return () => sub.remove();
-  }, []);
+  }, [checkBadgeValidity]);
 
   useEffect(() => {
     const interval = setInterval(checkBadgeValidity, 60_000);
     return () => clearInterval(interval);
-  }, []);
+  }, [checkBadgeValidity]);
 
-  // VALIDASI ke backend sebelum menyimpan badge
-  const validateBadgeWithServer = async (badge: string) => {
+  /** Validasi ke backend: TIDAK boleh login saat offline */
+  const validateBadgeWithServer = useCallback(async (badge: string): Promise<PetugasInfo | null> => {
     try {
       setValidating(true);
       const res = await safeFetchOffline(
@@ -141,79 +209,96 @@ export const BadgeProvider = ({ children }: { children: ReactNode }) => {
         { method: 'GET' }
       );
 
-      // kalau “offline” (server down / network) → larang login baru
-      try {
-        const json = await res.json().catch(() => null);
-        if (json && (json as any).offline) {
-          Alert.alert(
-            'Gagal Verifikasi',
-            (json as any).reason === 'server-5xx'
-              ? 'Server sedang bermasalah. Coba lagi nanti.'
-              : 'Tidak ada koneksi. Pastikan internet aktif untuk verifikasi badge.'
-          );
-          return null;
-        }
-        // kalau backend balikin 404/400
-        if (res.status === 404 || res.status === 400) {
-          Alert.alert('Badge Tidak Terdaftar', 'Silakan periksa kembali badge number Anda.');
-          return null;
-        }
-        if (!res.ok) {
-          Alert.alert('Gagal Verifikasi', `Server mengembalikan status ${res.status}.`);
-          return null;
-        }
-        // OK
-        return json; // mungkin berisi info lokasi/nama petugas
-      } catch {
-        Alert.alert('Gagal Verifikasi', 'Format respons tidak valid.');
+      const json = await res.json().catch(() => null);
+
+      // offline/network/server-5xx → larang login baru
+      if (json && (json as any).offline) {
+        Alert.alert(
+          'Gagal Verifikasi',
+          (json as any).reason === 'server-5xx'
+            ? 'Server sedang bermasalah. Coba lagi nanti.'
+            : 'Tidak ada koneksi. Pastikan internet aktif untuk verifikasi badge.'
+        );
         return null;
       }
+
+      if (res.status === 404 || res.status === 400) {
+        Alert.alert('Badge Tidak Terdaftar', 'Silakan periksa kembali badge number Anda.');
+        return null;
+      }
+      if (!res.ok || !json) {
+        Alert.alert('Gagal Verifikasi', `Server mengembalikan status ${res.status}.`);
+        return null;
+      }
+
+      // Ambil detail interval jika belum lengkap
+      const rawIntervalId =
+        json?.IntervalPetugasId ?? json?.intervalPetugasId ?? json?.petugas?.IntervalPetugasId ?? null;
+      const intervalDetail = await fetchIntervalDetailIfNeeded(
+        rawIntervalId ? Number(rawIntervalId) : null
+      );
+
+      return toPetugasInfo(badge, json, intervalDetail);
     } catch (e: any) {
       Alert.alert('Gagal Verifikasi', e?.message || 'Terjadi kesalahan jaringan.');
       return null;
     } finally {
       setValidating(false);
     }
-  };
+  }, [fetchIntervalDetailIfNeeded, toPetugasInfo]);
 
-  const setBadgeNumber = async (b: string) => {
-    // validasi dulu
+  /** Set badge + cache info */
+  const setBadgeNumber = useCallback(async (b: string) => {
     const info = await validateBadgeWithServer(b);
-    if (!info) {
-      // tidak valid / tidak bisa diverifikasi → tetap tampilkan modal
-      return;
-    }
+    if (!info) return;
 
-    // simpan badge + timestamp + (opsional) info petugas
     const now = Date.now().toString();
     await AsyncStorage.multiSet([
       [BADGE_KEY, b],
       [BADGE_TIMESTAMP_KEY, now],
+      [PETUGAS_INFO_KEY, JSON.stringify(info)],
     ]);
-    try {
-      await AsyncStorage.setItem(PETUGAS_INFO_KEY, JSON.stringify(info));
-    } catch {}
 
     setBadge(b);
+    setPetugasInfo(info);
     setShowModal(false);
-  };
+  }, [validateBadgeWithServer]);
 
-  const clearBadgeNumber = async () => {
+  /** Clear badge (logout) */
+  const clearBadgeNumber = useCallback(async () => {
+    // bersihkan juga flag preload per badge
+    try {
+      if (badgeNumber) {
+        const flagKey = `PRELOAD_FULL_FOR_${badgeNumber}`;
+        await AsyncStorage.removeItem(flagKey);
+      }
+    } catch {}
+
     await AsyncStorage.multiRemove([BADGE_KEY, BADGE_TIMESTAMP_KEY, PETUGAS_INFO_KEY]);
     setBadge('');
+    setPetugasInfo(null);
     setShowModal(true);
-  };
+  }, [badgeNumber]);
+
+  /** Rescue atau punya lokasi → offline capable */
+  const offlineCapable = useMemo(() => {
+    const hasLokasi = !!petugasInfo?.lokasiId;
+    return isRescue(petugasInfo?.role) || hasLokasi;
+  }, [petugasInfo]);
 
   if (!ready) return null;
 
   return (
-    <BadgeContext.Provider value={{ badgeNumber, setBadgeNumber, clearBadgeNumber }}>
+    <BadgeContext.Provider
+      value={{ badgeNumber, setBadgeNumber, clearBadgeNumber, petugasInfo, offlineCapable }}
+    >
       {children}
       {showModal && <BadgeModal onSave={setBadgeNumber} loading={validating} />}
     </BadgeContext.Provider>
   );
 };
 
+/** ====== Styles ====== */
 const styles = StyleSheet.create({
   overlay: {
     flex: 1,

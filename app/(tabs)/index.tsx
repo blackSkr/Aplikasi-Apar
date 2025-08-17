@@ -56,7 +56,7 @@ async function debugPing(tag: string) {
 
 export default function AparInformasi() {
   const { loading, list, refresh, offlineReason } = useAparList();
-  const { badgeNumber, clearBadgeNumber } = useBadge();
+  const { badgeNumber, clearBadgeNumber, offlineCapable } = useBadge(); // ⬅️ pakai info dari BadgeProvider
 
   const { count, isFlushing, refreshQueue, flushNow } = useOfflineQueue({
     autoFlushOnReconnect: false,
@@ -259,6 +259,13 @@ export default function AparInformasi() {
           <OfflineText>🛠️ Server sedang bermasalah. Menampilkan data dari cache.</OfflineText>
         </OfflineBanner>
       )}
+      {isConnected && !offlineCapable && (
+        <OfflineBanner>
+          <OfflineText>
+            ⚠️ Mode Online-only — akun ini belum terikat lokasi & bukan Rescue. Preload/flush offline dimatikan.
+          </OfflineText>
+        </OfflineBanner>
+      )}
 
       <Stats
         jenisList={jenisList}
@@ -283,8 +290,8 @@ export default function AparInformasi() {
             onPressDetails={() => {
               const pathname =
                 item.statusMaintenance === 'Sudah'
-                  ? '/ManajemenApar/AparHistory'       // ⬅️ buka riwayat read-only
-                  : '/ManajemenApar/AparMaintenance';  // ⬅️ form input seperti biasa
+                  ? '/ManajemenApar/AparHistory'
+                  : '/ManajemenApar/AparMaintenance';
               router.push({
                 pathname,
                 params: { id: String(item.id_apar) },
@@ -304,7 +311,7 @@ export default function AparInformasi() {
         stickySectionHeadersEnabled={false}
       />
 
-      {isConnected && (count > 0 || isFlushing || forceShowFlushCta) && (
+      {isConnected && offlineCapable && (count > 0 || isFlushing || forceShowFlushCta) && (
         <FloatingBtn
           onPress={() => {
             if (isFlushing) {
@@ -343,7 +350,7 @@ export default function AparInformasi() {
 const Container = styled.View` flex: 1; background: #f5f5f5; `;
 const LoadingText = styled(Text)` margin-top: 12px; color: ${Colors.text}; font-size: 16px; `;
 const OfflineBanner = styled(View)` padding: 10px; align-items: center; background: #fff3cd; `;
-const OfflineText = styled(Text)` color: #d50000; font-size: 13px; `;
+const OfflineText = styled(Text)` color: #7a5a00; font-size: 13px; text-align: center; `;
 const SectionHeader = styled(View)` background: #f5f5f5; padding: 8px 16px; `;
 const SectionTitle = styled(Text)` font-size: 16px; font-weight: bold; color: ${Colors.text}; `;
 const EmptyContainer = styled(View)` padding: 24px; align-items: center; `;

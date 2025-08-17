@@ -23,11 +23,11 @@ const ALLOW_NAV_WITHOUT_CACHE_WHEN_OFFLINE = false;
 
 const ScanQr: React.FC = () => {
   const router = useRouter();
-  const { badgeNumber } = useBadge();
+  const { badgeNumber, offlineCapable } = useBadge(); // ⬅️ pakai offlineCapable
 
   const [permission, requestPermission] = useCameraPermissions();
 
-  // ⬇️ tambahkan flag untuk mengontrol mount/unmount kamera
+  // ⬇️ flag kontrol mount/unmount kamera
   const [camEnabled, setCamEnabled] = useState<boolean>(false);
 
   const [scanned, setScanned] = useState(false);
@@ -41,17 +41,14 @@ const ScanQr: React.FC = () => {
     useCallback(() => {
       let unsubNet: ReturnType<typeof NetInfo.addEventListener> | null = null;
 
-      // reset UI scan tiap masuk
       setScanned(false);
       setQrToken('');
       setHasLocalDetail(false);
 
-      // nyalakan kamera saat screen fokus
       setCamEnabled(true);
 
       unsubNet = NetInfo.addEventListener(s => setIsConnected(!!s.isConnected));
       return () => {
-        // matikan kamera saat blur agar resource dilepas
         setCamEnabled(false);
         if (unsubNet) unsubNet();
       };
@@ -93,8 +90,10 @@ const ScanQr: React.FC = () => {
   const canNavigate = useMemo(() => {
     if (!badgeNumber || !qrToken) return false;
     if (isConnected) return true;
+    // Jika offline, hanya boleh jika offlineCapable DAN detail sudah ada di cache
+    if (!offlineCapable) return false;
     return hasLocalDetail || ALLOW_NAV_WITHOUT_CACHE_WHEN_OFFLINE;
-  }, [badgeNumber, qrToken, isConnected, hasLocalDetail]);
+  }, [badgeNumber, qrToken, isConnected, hasLocalDetail, offlineCapable]);
 
   const goToDetail = async () => {
     if (!qrToken || !badgeNumber) {
@@ -102,14 +101,20 @@ const ScanQr: React.FC = () => {
       return;
     }
 
-    if (!isConnected && !hasLocalDetail && !ALLOW_NAV_WITHOUT_CACHE_WHEN_OFFLINE) {
-      const id = await AsyncStorage.getItem(`APAR_TOKEN_${qrToken}`);
-      if (id) {
-        router.push({ pathname: '/ManajemenApar/AparMaintenance', params: { id } });
+    if (!isConnected) {
+      if (!offlineCapable) {
+        Alert.alert('Mode Online-only', 'Akun ini tidak mendukung akses offline. Silakan sambungkan internet.');
         return;
       }
-      Alert.alert('Butuh Data Lokal', 'Detail token ini belum tersimpan. Buka sekali saat online agar bisa diakses offline.');
-      return;
+      if (!hasLocalDetail && !ALLOW_NAV_WITHOUT_CACHE_WHEN_OFFLINE) {
+        const id = await AsyncStorage.getItem(`APAR_TOKEN_${qrToken}`);
+        if (id) {
+          router.push({ pathname: '/ManajemenApar/AparMaintenance', params: { id } });
+          return;
+        }
+        Alert.alert('Butuh Data Lokal', 'Detail token ini belum tersimpan. Buka sekali saat online agar bisa diakses offline.');
+        return;
+      }
     }
 
     router.push({ pathname: '/ManajemenApar/AparMaintenance', params: { token: qrToken } });
@@ -157,12 +162,19 @@ const ScanQr: React.FC = () => {
         </OfflineBanner>
       )}
 
+      {/* ⬇️ Banner tambahan untuk mode online-only */}
+      {!isConnected && !offlineCapable && (
+        <OfflineBanner>
+          <OfflineText>⚠️ Mode Online-only — akun ini tidak mendukung akses detail secara offline.</OfflineText>
+        </OfflineBanner>
+      )}
+
       <Content>
         <ScannerContainer>
           {/* HANYA render CameraView saat camEnabled = true (screen fokus) */}
           {camEnabled && (
             <CameraView
-              key={camEnabled ? 'cam-on' : 'cam-off'} // paksa re-mount saat focus/blur
+              key={camEnabled ? 'cam-on' : 'cam-off'}
               style={StyleSheet.absoluteFill}
               facing="back"
               onBarcodeScanned={scanned ? undefined : handleBarcodeScanned}
@@ -213,13 +225,15 @@ const ScanQr: React.FC = () => {
           <ButtonText>
             {isConnected
               ? 'LIHAT DETAIL'
-              : hasLocalDetail || ALLOW_NAV_WITHOUT_CACHE_WHEN_OFFLINE
-              ? 'LIHAT DETAIL (Offline)'
-              : 'DETAIL BELUM TERSIMPAN'}
+              : offlineCapable
+              ? (hasLocalDetail || ALLOW_NAV_WITHOUT_CACHE_WHEN_OFFLINE
+                ? 'LIHAT DETAIL (Offline)'
+                : 'DETAIL BELUM TERSIMPAN')
+              : 'MODE ONLINE-ONLY'}
           </ButtonText>
         </PrimaryButton>
 
-        {!isConnected && scanned && !hasLocalDetail && !ALLOW_NAV_WITHOUT_CACHE_WHEN_OFFLINE && (
+        {!isConnected && scanned && !hasLocalDetail && offlineCapable && !ALLOW_NAV_WITHOUT_CACHE_WHEN_OFFLINE && (
           <TinyNote>Buka sekali saat online agar detail ini tersimpan dan bisa diakses offline.</TinyNote>
         )}
       </Content>

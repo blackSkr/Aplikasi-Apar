@@ -28,6 +28,10 @@ import { __CONFIG_DEBUG__, baseUrl, logApiConfig } from '@/src/config';
 import { installFetchLogger } from '@/src/setupNetworking';
 import { createLogger } from '@/src/utils/logger';
 
+// ⬇️ ADD: initial offline sync
+import InitialSyncModal from '@/components/Sync/InitialSyncModal';
+import { runInitialSync, SyncProgress } from '@/src/services/initialSync';
+
 installFetchLogger();
 const log = createLogger('home');
 
@@ -71,6 +75,15 @@ export default function AparInformasi() {
   const [relogKey, setRelogKey] = useState(0);
   const [forceShowFlushCta, setForceShowFlushCta] = useState(false);
 
+  // ⬇️ ADD: modal progress initial sync
+  const [syncVisible, setSyncVisible] = useState(false);
+  const [syncProgress, setSyncProgress] = useState<SyncProgress>({
+    phase: 'prepare',
+    total: 0,
+    done: 0,
+    message: 'Memulai…',
+  });
+
   useEffect(() => {
     (async () => {
       logApiConfig('boot');
@@ -101,7 +114,7 @@ export default function AparInformasi() {
   const forceTimerRef = useRef<NodeJS.Timeout | null>(null);
   const lastIsConnectedRef = useRef<boolean | null>(null);
 
-  // ⬇️ filter list berdasarkan lokasi petugas (kalau ada)
+  // Filter list berdasarkan lokasi petugas (kalau ada)
   const listByLokasi = useMemo(() => {
     if (!petugasInfo?.lokasiNama) return list;
     const ln = String(petugasInfo.lokasiNama).trim().toLowerCase();
@@ -183,6 +196,46 @@ export default function AparInformasi() {
       refreshSafeRef.current();
     }
   }, [preloadStatus]);
+
+  // ⬇️ ADD: jalankan initial sync sekali setelah login (offline-capable)
+  useEffect(() => {
+    (async () => {
+      if (!badgeNumber) return;
+      if (!offlineCapable || isEmployeeOnly) return;
+
+      const flagKey = `PRELOAD_FULL_FOR_${badgeNumber}`;
+      const doneFlag = await AsyncStorage.getItem(flagKey);
+      if (doneFlag === '1') return; // sudah pernah sync pada sesi ini
+
+      try {
+        setSyncVisible(true);
+        setSyncProgress({ phase: 'prepare', total: 0, done: 0, message: 'Menyiapkan sinkronisasi…' });
+
+        const result = await runInitialSync(badgeNumber, p => setSyncProgress(p));
+
+        await AsyncStorage.setItem(flagKey, '1');
+
+        if (result.failed > 0) {
+          Alert.alert(
+            'Sinkronisasi Selesai (Sebagian Gagal)',
+            `Berhasil: ${result.success}/${result.total}. Item gagal akan dicoba ulang saat online.`,
+            [{ text: 'OK' }]
+          );
+        }
+
+        // refresh list supaya langsung pakai cache terbaru
+        await refreshSafeRef.current();
+      } catch (e: any) {
+        Alert.alert(
+          'Gagal Menyinkronkan',
+          'Tidak bisa menyiapkan data offline. Data cache lama (jika ada) tetap dipakai.',
+          [{ text: 'OK' }]
+        );
+      } finally {
+        setSyncVisible(false);
+      }
+    })();
+  }, [badgeNumber, offlineCapable, isEmployeeOnly]);
 
   const handleLogout = async () => {
     if (badgeNumber) {
@@ -350,6 +403,9 @@ export default function AparInformasi() {
           <FloatingText>{isFlushing ? '⏳ Mengirim…' : `🔄 Kirim (${count})`}</FloatingText>
         </FloatingBtn>
       )}
+
+      {/* ⬇️ ADD: Modal progress initial sync */}
+      <InitialSyncModal visible={syncVisible} progress={syncProgress} />
     </Container>
   );
 }

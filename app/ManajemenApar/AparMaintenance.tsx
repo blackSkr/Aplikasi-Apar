@@ -23,6 +23,10 @@ import { useOfflineQueue } from '@/hooks/useOfflineQueue';
 import { flushQueue, safeFetchOffline } from '@/utils/ManajemenOffline';
 import { useLayoutEffect } from 'react';
 
+// ✅ tambahan untuk hitung offset header & padding safe area
+import { useHeaderHeight } from '@react-navigation/elements';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+
 type ChecklistItemState = {
   checklistId?: number;
   item: string;
@@ -78,7 +82,6 @@ function normalizeApar(raw: any): AparData {
 }
 
 export default function AparMaintenance() {
-  
   const navigation = useNavigation();
   useLayoutEffect(() => {
     navigation.setOptions({ title: 'Inspeksi Alat' });
@@ -87,6 +90,10 @@ export default function AparMaintenance() {
   const route = useRoute();
   const { badgeNumber } = useBadge();
   const { count: queueCount, refreshQueue } = useOfflineQueue();
+
+  // ✅ offset header & padding safe area
+  const headerHeight = useHeaderHeight();
+  const insets = useSafeAreaInsets();
 
   const params = (route.params as any) || {};
   const keyParam = params.id
@@ -206,17 +213,19 @@ export default function AparMaintenance() {
     });
     if (!result.canceled) setFotoUris(prev => [...prev, result.assets[0].uri]);
   };
-// ubah 'Baik' | 'Tidak Baik' -> 1 | 0
-const toDicentang = (cond: ChecklistItemState['condition']) =>
-  cond === 'Baik' ? 1 : 0;
 
-// serialize agar sesuai BE
-const serializeChecklist = (states: ChecklistItemState[]) =>
-  states.map(s => ({
-    ChecklistId: Number(s.checklistId || 0),
-    Dicentang: toDicentang(s.condition),
-    Keterangan: s.condition === 'Tidak Baik' ? (s.alasan || '') : ''
-  }));
+  // ubah 'Baik' | 'Tidak Baik' -> 1 | 0
+  const toDicentang = (cond: ChecklistItemState['condition']) =>
+    cond === 'Baik' ? 1 : 0;
+
+  // serialize agar sesuai BE
+  const serializeChecklist = (states: ChecklistItemState[]) =>
+    states.map(s => ({
+      ChecklistId: Number(s.checklistId || 0),
+      Dicentang: toDicentang(s.condition),
+      Keterangan: s.condition === 'Tidak Baik' ? (s.alasan || '') : ''
+    }));
+
   const handleSubmit = async () => {
     if (!badgeNumber || !data) {
       Alert.alert('Error','Data tidak lengkap');
@@ -230,36 +239,35 @@ const serializeChecklist = (states: ChecklistItemState[]) =>
     }
 
     setSubmitting(true);
-const formData = new FormData();
+    const formData = new FormData();
 
-formData.append('aparId', String(data.id_apar));
-formData.append('tanggal', new Date().toISOString());
-formData.append('badgeNumber', badgeNumber);
+    formData.append('aparId', String(data.id_apar));
+    formData.append('tanggal', new Date().toISOString());
+    formData.append('badgeNumber', badgeNumber);
 
-if (data.intervalPetugasId != null) {
-  formData.append('intervalPetugasId', String(data.intervalPetugasId));
-}
-formData.append('kondisi', kondisi);
-formData.append('catatanMasalah', catatanMasalah);
-formData.append('rekomendasi', rekomendasi);
-formData.append('tindakLanjut', tindakLanjut);
-formData.append('tekanan', tekanan);
-formData.append('jumlahMasalah', jumlahMasalah);
+    if (data.intervalPetugasId != null) {
+      formData.append('intervalPetugasId', String(data.intervalPetugasId));
+    }
+    formData.append('kondisi', kondisi);
+    formData.append('catatanMasalah', catatanMasalah);
+    formData.append('rekomendasi', rekomendasi);
+    formData.append('tindakLanjut', tindakLanjut);
+    formData.append('tekanan', tekanan);
+    formData.append('jumlahMasalah', jumlahMasalah);
 
-// ⬇️ kirim format yang BE harapkan
-formData.append('checklist', JSON.stringify(serializeChecklist(checklistStates)));
+    // ⬇️ kirim format yang BE harapkan
+    formData.append('checklist', JSON.stringify(serializeChecklist(checklistStates)));
 
-// ⬇️ pakai field 'photos' (bukan 'fotos') + mime aman
-fotoUris.forEach((uri, idx) => {
-  // fallback ke jpeg biar aman
-  const name = `photo_${idx + 1}.jpg`;
-  formData.append('photos', {
-    uri,
-    name,
-    type: 'image/jpeg',
-  } as any);
-});
-
+    // ⬇️ pakai field 'photos' (bukan 'fotos') + mime aman
+    fotoUris.forEach((uri, idx) => {
+      // fallback ke jpeg biar aman
+      const name = `photo_${idx + 1}.jpg`;
+      formData.append('photos', {
+        uri,
+        name,
+        type: 'image/jpeg',
+      } as any);
+    });
 
     try {
       const path = '/api/perawatan/submit';
@@ -302,10 +310,21 @@ fotoUris.forEach((uri, idx) => {
 
   return (
     <KeyboardAvoidingView
-      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
       style={{ flex: 1 }}
+      // iOS: konten didorong sesuai tinggi keyboard; Android: ubah tinggi container
+      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+      // offset agar tidak nabrak header navigation
+      keyboardVerticalOffset={headerHeight}
     >
-      <ScrollContainer>
+      <ScrollContainer
+        // penting: biar tombol/pressable tetap bisa dipencet saat keyboard terbuka
+        keyboardShouldPersistTaps="handled"
+        // iOS: swipe untuk menutup keyboard lebih smooth
+        keyboardDismissMode={Platform.OS === 'ios' ? 'interactive' : 'on-drag'}
+        // beri ruang ekstra di bawah supaya field/tombol paling bawah tetap terlihat
+        contentContainerStyle={{ paddingBottom: (insets?.bottom ?? 0) + 24 }}
+        contentInsetAdjustmentBehavior={Platform.OS === 'ios' ? 'always' : 'automatic'}
+      >
         {/* DETAIL APAR */}
         <Card>
           <Label>No APAR:</Label>
@@ -342,6 +361,8 @@ fotoUris.forEach((uri, idx) => {
                     onChangeText={t => updateChecklist(i, { alasan: t })}
                     placeholder="Jelaskan masalah"
                     multiline
+                    // bantu scroll supaya fokus field ini naik saat keyboard muncul
+                    textAlignVertical="top"
                   />
                 </>
               )}
@@ -379,6 +400,9 @@ fotoUris.forEach((uri, idx) => {
         <SubmitButton disabled={submitting} onPress={handleSubmit}>
           {submitting ? <ActivityIndicator color="#fff" /> : <SubmitText>Simpan Maintenance</SubmitText>}
         </SubmitButton>
+
+        {/* spacer tambahan agar tombol tidak ketindih keyboard di device kecil */}
+        <View style={{ height: (insets?.bottom ?? 0) + 16 }} />
       </ScrollContainer>
     </KeyboardAvoidingView>
   );
@@ -410,10 +434,20 @@ const Input = styled(TextInput).attrs({
   padding: 12px;
   border-radius: 6px;
   margin-bottom: 12px;
-  color: #111827; /* Teks jadi terlihat di background putih */
-`;const QuestionText = styled(Text)` font-size: 15px; font-weight: 500; color: #374151; margin-bottom: 8px; `;
+  color: #111827;
+`;
+const QuestionText = styled(Text)` font-size: 15px; font-weight: 500; color: #374151; margin-bottom: 8px; `;
 const ButtonRow = styled(View)` flex-direction: row; margin-bottom: 12px; justify-content: space-between; `;
-const Toggle = styled(Pressable)<{ active: boolean }>` flex: 1; background-color: ${({ active }) => (active ? '#dc2626' : '#f3f4f6')}; padding: 12px; border-radius: 6px; align-items: center; margin-horizontal: 4px; border-width: 1px; border-color: ${({ active }) => (active ? '#dc2626' : '#d1d5db')}; `;
+const Toggle = styled(Pressable)<{ active: boolean }>`
+  flex: 1;
+  background-color: ${({ active }) => (active ? '#dc2626' : '#f3f4f6')};
+  padding: 12px;
+  border-radius: 6px;
+  align-items: center;
+  margin-horizontal: 4px;
+  border-width: 1px;
+  border-color: ${({ active }) => (active ? '#dc2626' : '#d1d5db')};
+`;
 const ToggleText = styled(Text)<{ active: boolean }>` color: ${({ active }) => (active ? '#fff' : '#6b7280')}; font-weight: 600; font-size: 14px; `;
 const uploadStyle = { backgroundColor: '#f3f4f6', padding: 16, borderRadius: 6, alignItems: 'center', marginBottom: 12, borderWidth: 2, borderColor: '#d1d5db', borderStyle: 'dashed', } as const;
 const SubmitButton = styled(Pressable)<{ disabled?: boolean }>` background-color: ${({ disabled }) => (disabled ? '#9ca3af' : '#dc2626')}; padding: 16px; margin: 20px 16px 0; border-radius: 8px; align-items: center; `;

@@ -206,7 +206,17 @@ export default function AparMaintenance() {
     });
     if (!result.canceled) setFotoUris(prev => [...prev, result.assets[0].uri]);
   };
+// ubah 'Baik' | 'Tidak Baik' -> 1 | 0
+const toDicentang = (cond: ChecklistItemState['condition']) =>
+  cond === 'Baik' ? 1 : 0;
 
+// serialize agar sesuai BE
+const serializeChecklist = (states: ChecklistItemState[]) =>
+  states.map(s => ({
+    ChecklistId: Number(s.checklistId || 0),
+    Dicentang: toDicentang(s.condition),
+    Keterangan: s.condition === 'Tidak Baik' ? (s.alasan || '') : ''
+  }));
   const handleSubmit = async () => {
     if (!badgeNumber || !data) {
       Alert.alert('Error','Data tidak lengkap');
@@ -220,37 +230,36 @@ export default function AparMaintenance() {
     }
 
     setSubmitting(true);
-    const formData = new FormData();
-    formData.append('aparId', String(data.id_apar));
-    formData.append('tanggal', new Date().toISOString());
-    formData.append('badgeNumber', badgeNumber);
-    if (data.intervalPetugasId != null) {
-      formData.append('intervalPetugasId', String(data.intervalPetugasId));
-    }
-    formData.append('kondisi', kondisi);
-    formData.append('catatanMasalah', catatanMasalah);
-    formData.append('rekomendasi', rekomendasi);
-    formData.append('tindakLanjut', tindakLanjut);
-    formData.append('tekanan', tekanan);
-    formData.append('jumlahMasalah', jumlahMasalah);
-    formData.append(
-      'checklist',
-      JSON.stringify(
-        checklistStates.map(c => ({
-          checklistId: c.checklistId,
-          condition: c.condition,
-          alasan: c.alasan,
-        }))
-      )
-    );
-    fotoUris.forEach((uri, idx) => {
-      const ext = uri.split('.').pop() || 'jpg';
-      formData.append('fotos', {
-        uri,
-        name: `photo${idx}.${ext}`,
-        type: `image/${ext}`,
-      } as any);
-    });
+const formData = new FormData();
+
+formData.append('aparId', String(data.id_apar));
+formData.append('tanggal', new Date().toISOString());
+formData.append('badgeNumber', badgeNumber);
+
+if (data.intervalPetugasId != null) {
+  formData.append('intervalPetugasId', String(data.intervalPetugasId));
+}
+formData.append('kondisi', kondisi);
+formData.append('catatanMasalah', catatanMasalah);
+formData.append('rekomendasi', rekomendasi);
+formData.append('tindakLanjut', tindakLanjut);
+formData.append('tekanan', tekanan);
+formData.append('jumlahMasalah', jumlahMasalah);
+
+// ⬇️ kirim format yang BE harapkan
+formData.append('checklist', JSON.stringify(serializeChecklist(checklistStates)));
+
+// ⬇️ pakai field 'photos' (bukan 'fotos') + mime aman
+fotoUris.forEach((uri, idx) => {
+  // fallback ke jpeg biar aman
+  const name = `photo_${idx + 1}.jpg`;
+  formData.append('photos', {
+    uri,
+    name,
+    type: 'image/jpeg',
+  } as any);
+});
+
 
     try {
       const path = '/api/perawatan/submit';

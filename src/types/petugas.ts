@@ -1,5 +1,4 @@
 // src/types/petugas.ts
-
 export interface PetugasInfo {
   badge: string;
   role?: string | null;

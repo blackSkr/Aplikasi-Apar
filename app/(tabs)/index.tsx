@@ -1,4 +1,3 @@
-// app/(tabs)/index.tsx
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import NetInfo from '@react-native-community/netinfo';
 import { useFocusEffect } from '@react-navigation/native';
@@ -56,7 +55,7 @@ async function debugPing(tag: string) {
 
 export default function AparInformasi() {
   const { loading, list, refresh, offlineReason } = useAparList();
-  const { badgeNumber, clearBadgeNumber, offlineCapable } = useBadge(); // ⬅️ pakai info dari BadgeProvider
+  const { badgeNumber, clearBadgeNumber, petugasInfo, offlineCapable, isEmployeeOnly } = useBadge();
 
   const { count, isFlushing, refreshQueue, flushNow } = useOfflineQueue({
     autoFlushOnReconnect: false,
@@ -102,9 +101,18 @@ export default function AparInformasi() {
   const forceTimerRef = useRef<NodeJS.Timeout | null>(null);
   const lastIsConnectedRef = useRef<boolean | null>(null);
 
+  // ⬇️ filter list berdasarkan lokasi petugas (kalau ada)
+  const listByLokasi = useMemo(() => {
+    if (!petugasInfo?.lokasiNama) return list;
+    const ln = String(petugasInfo.lokasiNama).trim().toLowerCase();
+    return list.filter(i =>
+      String(i.lokasi_apar || '').trim().toLowerCase() === ln
+    );
+  }, [list, petugasInfo]);
+
   const jenisList = useMemo(
-    () => Array.from(new Set(list.map(i => i.jenis_apar).filter(Boolean))),
-    [list]
+    () => Array.from(new Set(listByLokasi.map(i => i.jenis_apar).filter(Boolean))),
+    [listByLokasi]
   );
 
   useEffect(() => {
@@ -116,7 +124,7 @@ export default function AparInformasi() {
   useEffect(() => {
     setVisibleNeed(INITIAL_COUNT);
     setVisibleDone(INITIAL_COUNT);
-  }, [selectedJenis, list]);
+  }, [selectedJenis, listByLokasi]);
 
   useEffect(() => {
     const unsub = NetInfo.addEventListener(async s => {
@@ -185,17 +193,17 @@ export default function AparInformasi() {
   };
 
   const needAll = useMemo(
-    () => list
+    () => listByLokasi
       .filter(i => i.statusMaintenance === 'Belum')
       .filter(i => !selectedJenis || i.jenis_apar === selectedJenis),
-    [list, selectedJenis]
+    [listByLokasi, selectedJenis]
   );
 
   const doneAll = useMemo(
-    () => list
+    () => listByLokasi
       .filter(i => i.statusMaintenance === 'Sudah')
       .filter(i => !selectedJenis || i.jenis_apar === selectedJenis),
-    [list, selectedJenis]
+    [listByLokasi, selectedJenis]
   );
 
   if (loading) {
@@ -259,11 +267,10 @@ export default function AparInformasi() {
           <OfflineText>🛠️ Server sedang bermasalah. Menampilkan data dari cache.</OfflineText>
         </OfflineBanner>
       )}
-      {isConnected && !offlineCapable && (
+      {/* Banner online-only bila employee-only */}
+      {isEmployeeOnly && (
         <OfflineBanner>
-          <OfflineText>
-            ⚠️ Mode Online-only — akun ini belum terikat lokasi & bukan Rescue. Preload/flush offline dimatikan.
-          </OfflineText>
+          <OfflineText>⚠️ Mode Online-only — akun ini belum terikat lokasi & bukan Rescue. Preload/flush offline dimatikan.</OfflineText>
         </OfflineBanner>
       )}
 
@@ -311,7 +318,8 @@ export default function AparInformasi() {
         stickySectionHeadersEnabled={false}
       />
 
-      {isConnected && offlineCapable && (count > 0 || isFlushing || forceShowFlushCta) && (
+      {/* FAB Kirim Offline hanya kalau offlineCapable */}
+      {offlineCapable && isConnected && (count > 0 || isFlushing || forceShowFlushCta) && (
         <FloatingBtn
           onPress={() => {
             if (isFlushing) {
@@ -350,7 +358,7 @@ export default function AparInformasi() {
 const Container = styled.View` flex: 1; background: #f5f5f5; `;
 const LoadingText = styled(Text)` margin-top: 12px; color: ${Colors.text}; font-size: 16px; `;
 const OfflineBanner = styled(View)` padding: 10px; align-items: center; background: #fff3cd; `;
-const OfflineText = styled(Text)` color: #7a5a00; font-size: 13px; text-align: center; `;
+const OfflineText = styled(Text)` color: #d50000; font-size: 13px; `;
 const SectionHeader = styled(View)` background: #f5f5f5; padding: 8px 16px; `;
 const SectionTitle = styled(Text)` font-size: 16px; font-weight: bold; color: ${Colors.text}; `;
 const EmptyContainer = styled(View)` padding: 24px; align-items: center; `;

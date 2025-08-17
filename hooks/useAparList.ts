@@ -1,4 +1,3 @@
-// hooks/useAparList.ts
 import { useBadge } from '@/context/BadgeContext';
 import {
   DETAIL_ID_PREFIX,
@@ -35,6 +34,48 @@ export interface APAR extends AparRaw {
 const CONCURRENCY = 3;
 const PRELOAD_FLAG_PREFIX = 'PRELOAD_FULL_FOR_';
 
+function pickArrayAnywhere(json: any): any[] {
+  if (!json) return [];
+  if (Array.isArray(json)) return json;
+
+  // umum: { items: [...] } / { data: [...] }
+  if (Array.isArray(json.items)) return json.items;
+  if (Array.isArray(json.data)) return json.data;
+
+  // kadang: { result: { items: [...] } } / { payload: { data: [...] } }
+  if (Array.isArray(json.result?.items)) return json.result.items;
+  if (Array.isArray(json.result?.data)) return json.result.data;
+  if (Array.isArray(json.payload?.items)) return json.payload.items;
+  if (Array.isArray(json.payload?.data)) return json.payload.data;
+
+  // fallback: cari properti array pertama
+  for (const k of Object.keys(json)) {
+    if (Array.isArray((json as any)[k])) return (json as any)[k];
+  }
+  return [];
+}
+
+function mapRecord(d: any): AparRaw {
+  return {
+    id_apar: String(d?.id_apar ?? d?.Id ?? d?.ID ?? d?.id ?? ''),
+    no_apar: d?.no_apar ?? d?.NoApar ?? d?.noApar ?? d?.No_APAR ?? d?.no,
+    lokasi_apar:
+      d?.lokasi_apar ??
+      d?.Lokasi ??
+      d?.lokasi ??
+      d?.NamaLokasi ??
+      d?.nama_lokasi ??
+      d?.lokasiNama,
+    jenis_apar: d?.jenis_apar ?? d?.Jenis ?? d?.jenis ?? d?.JenisApar,
+    statusMaintenance: d?.last_inspection || d?.tanggal_selesai ? 'Sudah' : 'Belum',
+    interval_maintenance: (d?.kuota_per_bulan ?? d?.IntervalHari ?? 1) * 30,
+    nextDueDate: d?.next_due_date ?? d?.NextDueDate ?? d?.nextDueDate ?? '',
+    last_inspection: d?.last_inspection ?? d?.LastInspection ?? d?.tanggal_selesai ?? undefined,
+    tanggal_selesai: d?.tanggal_selesai ?? d?.last_inspection ?? undefined,
+    badge_petugas: d?.badge_petugas ?? d?.BadgePetugas ?? '',
+  };
+}
+
 export function useAparList() {
   const { badgeNumber, clearBadgeNumber } = useBadge();
 
@@ -44,12 +85,10 @@ export function useAparList() {
 
   const preloadingRef = useRef(false);
 
-  // reset flag offline tiap ganti badge
   useEffect(() => {
     setOfflineReason(null);
   }, [badgeNumber]);
 
-  // bersihkan cache detail yang kedaluwarsa (TTL)
   useEffect(() => {
     (async () => {
       try {
@@ -166,7 +205,7 @@ export function useAparList() {
         preloadingRef.current = false;
       }
     },
-    [] // eslint-disable-line react-hooks/exhaustive-deps
+    []
   );
 
   // ===== Fetch List =====
@@ -178,12 +217,11 @@ export function useAparList() {
     }
 
     try {
-      const res = await safeFetchOffline(
-        `${baseUrl}/api/peralatan?badge=${encodeURIComponent(badgeNumber)}`,
-        { method: 'GET' }
-      );
+      const url = `${baseUrl}/api/peralatan?badge=${encodeURIComponent(badgeNumber)}`;
+      console.log('[useAparList] GET', url);
+      const res = await safeFetchOffline(url, { method: 'GET' });
 
-      // 🔴 5xx = server bermasalah (bukan offline)
+      // 5xx = server bermasalah (bukan offline)
       if (res.status >= 500) {
         setOfflineReason('server-5xx');
         const cached = await AsyncStorage.getItem('APAR_CACHE');
@@ -198,7 +236,8 @@ export function useAparList() {
       }
 
       try {
-        const json = await res.json();
+        const json = await res.json().catch(() => null);
+        console.log('[useAparList] status', res.status, 'type', typeof json, 'keys', json && Object.keys(json));
 
         // safeFetchOffline menandai offline (network)
         if ((json as any)?.offline) {
@@ -219,37 +258,30 @@ export function useAparList() {
         setOfflineReason(null);
 
         if (res.status === 400 || res.status === 404) {
-          Alert.alert(`Error ${res.status}`, (json as any).message || 'Kesalahan');
+          Alert.alert(`Error ${res.status}`, (json as any)?.message || 'Kesalahan');
           clearBadgeNumber();
           setRawData([]);
           return;
         }
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
 
-        const data = json as any[];
-        const mapped: AparRaw[] = (data || []).map((d: any) => ({
-          id_apar: String(d.id_apar),
-          no_apar: d.no_apar,
-          lokasi_apar: d.lokasi_apar,
-          jenis_apar: d.jenis_apar,
-          statusMaintenance: d.last_inspection ? 'Sudah' as MaintenanceStatus : 'Belum' as MaintenanceStatus,
-          interval_maintenance: (d.kuota_per_bulan ?? 1) * 30,
-          nextDueDate: d.next_due_date ?? '',
-          last_inspection: d.last_inspection ?? undefined,
-          tanggal_selesai: d.last_inspection ?? undefined,
-          badge_petugas: d.badge_petugas ?? '',
-        }));
+        // ⬇️ Ambil array di mana pun dia berada
+        const dataArr = pickArrayAnywhere(json);
+        console.log('[useAparList] parsed items:', dataArr.length);
+
+        const mapped: AparRaw[] = dataArr.map(mapRecord).filter(r => r.id_apar !== '');
 
         setRawData(mapped);
         await AsyncStorage.setItem('APAR_CACHE', JSON.stringify(mapped));
 
         // Preload detail agar scan/akses offline tetap jalan
-        const ids = (data || [])
-          .map((d: any) => d.id_apar)
+        const ids = dataArr
+          .map((d: any) => d?.id_apar ?? d?.Id ?? d?.id)
           .filter((v: any) => v != null)
           .map((v: any) => String(v));
         preloadAllDetailsForBadge(ids, badgeNumber).catch(() => {});
       } catch (parseErr) {
+        console.warn('[useAparList] parse error', parseErr);
         const cached = await AsyncStorage.getItem('APAR_CACHE');
         if (cached) {
           setRawData(JSON.parse(cached));
@@ -260,6 +292,7 @@ export function useAparList() {
         }
       }
     } catch (e: any) {
+      console.warn('[useAparList] fetch error', e?.message || e);
       const cached = await AsyncStorage.getItem('APAR_CACHE');
       if (cached) {
         setRawData(JSON.parse(cached));

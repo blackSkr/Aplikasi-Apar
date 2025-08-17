@@ -199,7 +199,8 @@ export const BadgeProvider = ({ children }: { children: ReactNode }) => {
       return;
     }
     const diff = Date.now() - parseInt(ts, 10);
-    if (!Number.isFinite(diff) || diff > 60 * 60 * 1000) {
+    const BADGE_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7 hari
+    if (!Number.isFinite(diff) || diff > BADGE_TTL_MS) {
       await AsyncStorage.multiRemove([BADGE_KEY, BADGE_TIMESTAMP_KEY, PETUGAS_INFO_KEY, EMPLOYEE_INFO_KEY]);
       setBadge('');
       setPetugasInfo(null);

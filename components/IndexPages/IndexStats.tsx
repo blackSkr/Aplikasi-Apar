@@ -25,6 +25,7 @@ const StatCard = styled(Box).attrs({ p: 14, mB: 12, radius: 8, elevation: 1 })`
   background-color: #fff;
   align-items: center;
   justify-content: center;
+
 `;
 
 const StatLabel = styled.Text`
@@ -35,12 +36,12 @@ const StatLabel = styled.Text`
 `;
 
 type IndexStatsProps = {
-  jenisList?: string[]; // nullable atau optional
+  jenisList?: string[];
   onSelectJenis: (jenis: string) => void;
 };
 
 export default function IndexStats({
-  jenisList = ['APAR', 'Hydrant', 'Alarm'], // fallback dummy
+  jenisList = ['APAR', 'Hydrant', 'Alarm'],
   onSelectJenis,
 }: IndexStatsProps) {
   const listSiapRender = (jenisList || []).filter((j) => !!j);
@@ -48,6 +49,13 @@ export default function IndexStats({
   return (
     <StatsContainer>
       <Row>
+        {/* Tombol reset / tampilkan semua */}
+        <TouchableOpacity onPress={() => onSelectJenis('')}>
+          <StatCard>
+            <StatLabel numberOfLines={2}>Tampilkan Semua</StatLabel>
+          </StatCard>
+        </TouchableOpacity>
+
         {listSiapRender.map((jenis, index) => (
           <TouchableOpacity
             key={`${jenis}-${index}`}

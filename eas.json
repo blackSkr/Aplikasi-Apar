@@ -24,6 +24,21 @@
       "env": {
         "EXPO_PUBLIC_API_URL": "http://172.16.34.189:3000"
       }
+    },
+
+    "home": {
+      "distribution": "internal",
+      "android": { "buildType": "apk" },
+      "env": {
+        "EXPO_PUBLIC_API_URL": "http://192.168.1.3:3000"
+      }
+    },
+    "office": {
+      "distribution": "internal",
+      "android": { "buildType": "apk" },
+      "env": {
+        "EXPO_PUBLIC_API_URL": "http://172.16.34.189:3000"
+      }
     }
   },
   "submit": { "production": {} }

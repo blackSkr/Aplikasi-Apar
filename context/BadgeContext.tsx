@@ -68,6 +68,12 @@ export const getPreloadFlagKey = PRELOAD_FLAG;
 const STATUS_KEY = (id: number) => `APAR_STATUS_id=${id}`;   // value: StatusResp['data'] | null
 const HISTORY_KEY = (id: number) => `APAR_HISTORY_id=${id}`; // value: HistoryItem[] (dibatasi)
 
+// cache baru utk offline scan (by token)
+const OFFLINE_DETAIL_BY_TOKEN = (token: string) => `OFF_APAR_DETAIL_token=${token}`;
+// indeks token agar pencarian offline cepat
+const OFFLINE_TOKEN_INDEX = (badge: string) => `OFF_APAR_TOKEN_INDEX_for_${badge}`; // string[] of tokens
+const OFFLINE_TOKEN_TO_ID = (token: string) => `OFF_TOKEN_TO_ID_${token}`; // number
+
 /* =========================
    BE response types (ringkas)
    ========================= */
@@ -105,6 +111,19 @@ type HistoryItem = {
   JenisNama: string;
 };
 type TokenRow = { id_apar: number; token_qr: string; kode?: string; lokasi_nama?: string; jenis_nama?: string };
+type ManifestRow = TokenRow & { last_inspection?: string | null; next_due_date?: string | null };
+type OfflineDetail = {
+  id_apar: number;
+  token_qr: string;
+  kode: string;
+  lokasi_nama: string;
+  jenis_nama: string;
+  defaultIntervalBulan: number | null;
+  last_inspection_date: string | null;
+  nextDueDate: string | null;
+  daysUntilDue: number | null;
+  checklist: { checklistId: number; Pertanyaan: string }[];
+};
 
 /* =========================
    Context
@@ -196,7 +215,7 @@ function BlockingSyncModal({ visible, progress = 0 }: { visible: boolean; progre
               style={{
                 width: `${pct}%`,
                 height: '100%',
-                backgroundColor: '#D50000',   // <— tambahkan warna bar
+                backgroundColor: '#D50000',
                 borderRadius: 6,
               }}
             />
@@ -211,12 +230,15 @@ function BlockingSyncModal({ visible, progress = 0 }: { visible: boolean; progre
   );
 }
 
-
 /* =========================
    Provider
    ========================= */
-const HISTORY_LIMIT = 1;              // berapa item riwayat terbaru yang diprefetch
-const CONCURRENCY_STATUS = 5;         // concurrency untuk status/history
+const HISTORY_LIMIT = 1;      // berapa item riwayat terbaru yang diprefetch
+const CONCURRENCY_STATUS = 5; // concurrency untuk status/history
+
+// rescue flow
+const MANIFEST_PAGE_SIZE = 300;
+const DETAILS_CHUNK = 200;
 
 export const BadgeProvider = ({ children }: { children: ReactNode }) => {
   const [badgeNumber, setBadge] = useState('');
@@ -282,16 +304,28 @@ export const BadgeProvider = ({ children }: { children: ReactNode }) => {
         { method: 'GET' }
       );
       const json = await res.json().catch(() => null);
-      if (json && !json.offline && res.ok) return json;
+      if (json && !json?.offline && (res as any).ok) return json;
     } catch {}
     return null;
   }, []);
 
-  /* ---------- HTTP helper ---------- */
+  /* ---------- HTTP helpers ---------- */
   const getJson = useCallback(async (url: string) => {
     const res = await safeFetchOffline(url, { method: 'GET' });
     let json: any = null;
-    try { json = await res.json(); } catch {}
+    try { json = await (res as any).json(); } catch {}
+    const offline = !!json?.offline;
+    return { res, json, offline };
+  }, []);
+
+  const postJson = useCallback(async (url: string, body: any) => {
+    const res = await safeFetchOffline(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body ?? {}),
+    });
+    let json: any = null;
+    try { json = await (res as any).json(); } catch {}
     const offline = !!json?.offline;
     return { res, json, offline };
   }, []);
@@ -364,12 +398,12 @@ export const BadgeProvider = ({ children }: { children: ReactNode }) => {
           Alert.alert('Gagal Verifikasi', 'Tidak ada koneksi.');
           return { emp: null, pet: null } as const;
         }
-        if (empResp.res.status === 404) {
+        if ((empResp.res as any).status === 404) {
           Alert.alert('Badge Tidak Terdaftar', 'Tidak ditemukan di Employee.');
           return { emp: null, pet: null } as const;
         }
-        if (!empResp.res.ok || !empResp.json) {
-          Alert.alert('Gagal Verifikasi', `HTTP ${empResp.res.status}`);
+        if (!(empResp.res as any).ok || !empResp.json) {
+          Alert.alert('Gagal Verifikasi', `HTTP ${(empResp.res as any).status}`);
           return { emp: null, pet: null } as const;
         }
         const emp = toEmployeeInfo(badge, empResp.json);
@@ -381,7 +415,7 @@ export const BadgeProvider = ({ children }: { children: ReactNode }) => {
           return { emp, pet: null } as const;
         }
 
-        if (petResp.res.ok && petResp.json) {
+        if ((petResp.res as any).ok && petResp.json) {
           const rawIntervalId =
             petResp.json?.IntervalPetugasId ??
             petResp.json?.intervalPetugasId ??
@@ -396,7 +430,7 @@ export const BadgeProvider = ({ children }: { children: ReactNode }) => {
 
         // 3) Fallback baru (non-breaking)
         const fbResp = await getJson(`${baseUrl}/api/lokasi/by-badge/${encodeURIComponent(badge)}/mode`);
-        if (fbResp.res.ok && fbResp.json && !fbResp.offline) {
+        if ((fbResp.res as any).ok && fbResp.json && !fbResp.offline) {
           const pet = mapFromBadgeMode(badge, fbResp.json);
           return { emp, pet } as const;
         }
@@ -412,56 +446,178 @@ export const BadgeProvider = ({ children }: { children: ReactNode }) => {
     [fetchIntervalDetailIfNeeded, getJson, mapFromBadgeMode, toEmployeeInfo, toPetugasInfo]
   );
 
-  /* ---------- Prefetch STATUS + HISTORY (ringan) ---------- */
+  /* ---------- RESCUE: MANIFEST (paging) ---------- */
+  const fetchRescueManifest = useCallback(
+    async (badge: string): Promise<ManifestRow[]> => {
+      const all: ManifestRow[] = [];
+      let page = 1;
+      while (true) {
+        const url =
+          `${baseUrl}/api/peralatan/offline/manifest?` +
+          `badge=${encodeURIComponent(badge)}&daysAhead=7&fields=minimal&page=${page}&pageSize=${MANIFEST_PAGE_SIZE}`;
+        const r = await getJson(url);
+        if (!(r.res as any).ok || !Array.isArray(r.json)) break;
+        const batch = r.json as ManifestRow[];
+        all.push(...batch);
+        if (batch.length < MANIFEST_PAGE_SIZE) break;
+        page++;
+        // update progress kecil (hingga 15%)
+        setSyncProgress((p) => Math.min(0.15, p + 0.02));
+      }
+      return all;
+    },
+    [getJson]
+  );
+
+  /* ---------- RESCUE: DETAILS (bulk) ---------- */
+  const fetchRescueDetails = useCallback(
+    async (tokens: string[]): Promise<OfflineDetail[]> => {
+      const chunks: string[][] = [];
+      for (let i = 0; i < tokens.length; i += DETAILS_CHUNK) {
+        chunks.push(tokens.slice(i, i + DETAILS_CHUNK));
+      }
+      const collected: OfflineDetail[] = [];
+      for (let i = 0; i < chunks.length; i++) {
+        const r = await postJson(`${baseUrl}/api/peralatan/offline/details`, { tokens: chunks[i] });
+        if ((r.res as any).ok && Array.isArray(r.json)) {
+          collected.push(...(r.json as OfflineDetail[]));
+        }
+        // update progress details (hingga 55%)
+        const start = 0.15, end = 0.70; // manifest 0-0.15, details 0.15-0.70
+        const frac = (i + 1) / chunks.length;
+        setSyncProgress(start + (end - start) * frac);
+      }
+      return collected;
+    },
+    [postJson]
+  );
+
+  /* ---------- Prefetch STATUS + HISTORY ---------- */
   const prefetchStatusAndHistory = useCallback(
-    async (badge: string) => {
-      // Ambil daftar ID peralatan untuk petugas
+    async (badge: string, pet?: PetugasInfo | null, idsIfRescue?: number[]) => {
+      if (isRescue(pet?.role)) {
+        // Rescue: status-lite-batch (lebih ringan). History bisa dilewati/opsional.
+        const ids = Array.isArray(idsIfRescue) ? idsIfRescue : [];
+        if (!ids.length) return;
+
+        const CHUNK = 200;
+        const chunks: number[][] = [];
+        for (let i = 0; i < ids.length; i += CHUNK) chunks.push(ids.slice(i, i + CHUNK));
+
+        let processed = 0;
+        for (let i = 0; i < chunks.length; i++) {
+          const q = await getJson(
+            `${baseUrl}/api/perawatan/status-lite-batch?ids=${chunks[i].join(',')}`
+          );
+          if ((q.res as any).ok && Array.isArray(q.json)) {
+            for (const row of q.json) {
+              const id = Number(row?.aparId ?? row?.Id ?? 0);
+              if (!id) continue;
+              // Samakan bentuk dengan StatusResp.data agar konsumsi UI konsisten
+              const data = {
+                Id: row?.Id ?? null,
+                TanggalPemeriksaan: row?.TanggalPemeriksaan ?? null,
+                Kondisi: null,
+                AparKode: row?.AparKode ?? '',
+                LokasiNama: row?.LokasiNama ?? '',
+                JenisNama: row?.JenisNama ?? '',
+                PetugasBadge: null,
+                NamaInterval: null,
+                IntervalBulan: row?.IntervalBulan ?? null,
+                NextDueDate: row?.NextDueDate ?? null,
+              } as StatusResp['data'];
+              await AsyncStorage.setItem(STATUS_KEY(id), JSON.stringify(data));
+            }
+          }
+          processed += chunks[i].length;
+          const start = 0.70, end = 0.95;
+          const frac = processed / Math.max(1, ids.length);
+          setSyncProgress(start + (end - start) * frac);
+        }
+        // history rescue (opsional ringan) — skip agar cepat
+        return;
+      }
+
+      // Non-rescue (lama): pakai tokens-by-badge lalu loop status+history
       const r = await getJson(`${baseUrl}/api/peralatan/tokens-by-badge/${encodeURIComponent(badge)}`);
-      if (!r.res.ok || !Array.isArray(r.json)) return;
+      if (!(r.res as any).ok || !Array.isArray(r.json)) return;
 
       const rows: TokenRow[] = r.json;
       let done = 0;
       const total = rows.length;
-      const bump = () => setSyncProgress(p => Math.min(1, p < 0.7 ? p : 0.7 + (0.3 * done) / Math.max(1, total)));
+      const bump = () =>
+        setSyncProgress((p) =>
+          Math.min(1, p < 0.7 ? p : 0.7 + (0.3 * done) / Math.max(1, total || 1))
+        );
 
-      // pool sederhana
       const q = [...rows];
       const workers: Promise<void>[] = [];
       for (let w = 0; w < CONCURRENCY_STATUS; w++) {
-        workers.push((async () => {
-          while (q.length) {
-            const row = q.shift()!;
-            const id = Number(row.id_apar);
-            if (!id) { done++; bump(); continue; }
-
-            try {
-              // status (butuh badge)
-              const sres = await safeFetchOffline(`${baseUrl}/api/perawatan/status/${id}?badge=${encodeURIComponent(badge)}`, { method: 'GET' });
-              const sjson: StatusResp | any = await sres.json().catch(() => null);
-              if (sjson && sres.ok && !sjson?.offline) {
-                await AsyncStorage.setItem(STATUS_KEY(id), JSON.stringify(sjson.data ?? null));
+        workers.push(
+          (async () => {
+            while (q.length) {
+              const row = q.shift()!;
+              const id = Number(row.id_apar);
+              if (!id) {
+                done++;
+                bump();
+                continue;
               }
 
-              // history terbatas: ambil semua lalu simpan TOP N secara lokal
-              const hres = await safeFetchOffline(`${baseUrl}/api/perawatan/history/${id}`, { method: 'GET' });
-              const hjson: { success: boolean; data: HistoryItem[] } | any = await hres.json().catch(() => null);
-              if (hjson && hres.ok && !hjson?.offline && Array.isArray(hjson.data)) {
-                const limited = hjson.data.slice(0, HISTORY_LIMIT);
-                await AsyncStorage.setItem(HISTORY_KEY(id), JSON.stringify(limited));
+              try {
+                const statusUrl = `${baseUrl}/api/perawatan/status/${id}?badge=${encodeURIComponent(badge)}`;
+                const sres = await safeFetchOffline(statusUrl, { method: 'GET' });
+                const sjson: StatusResp | any = await (sres as any).json().catch(() => null);
+                if (sjson && (sres as any).ok && !sjson?.offline) {
+                  await AsyncStorage.setItem(STATUS_KEY(id), JSON.stringify(sjson.data ?? null));
+                }
+
+                // history terbatas
+                const hres = await safeFetchOffline(`${baseUrl}/api/perawatan/history/${id}`, { method: 'GET' });
+                const hjson: { success: boolean; data: HistoryItem[] } | any = await (hres as any).json().catch(() => null);
+                if (hjson && (hres as any).ok && !hjson?.offline && Array.isArray(hjson.data)) {
+                  const limited = hjson.data.slice(0, HISTORY_LIMIT);
+                  await AsyncStorage.setItem(HISTORY_KEY(id), JSON.stringify(limited));
+                }
+              } catch {
+                // skip
+              } finally {
+                done++;
+                bump();
               }
-            } catch { /* skip */ }
-            finally { done++; bump(); }
-          }
-        })());
+            }
+          })()
+        );
       }
       await Promise.all(workers);
     },
     [getJson]
   );
 
+  /* ---------- RESCUE: persist details for offline scan ---------- */
+  const persistOfflineDetails = useCallback(
+    async (badge: string, details: OfflineDetail[]) => {
+      const tokens: string[] = [];
+      const kv: [string, string][] = [];
+      const idMap: [string, string][] = [];
+
+      for (const d of details) {
+        if (!d?.token_qr) continue;
+        tokens.push(d.token_qr);
+        kv.push([OFFLINE_DETAIL_BY_TOKEN(d.token_qr), JSON.stringify(d)]);
+        if (d.id_apar) idMap.push([OFFLINE_TOKEN_TO_ID(d.token_qr), String(d.id_apar)]);
+      }
+
+      if (kv.length) await AsyncStorage.multiSet(kv);
+      if (idMap.length) await AsyncStorage.multiSet(idMap);
+      await AsyncStorage.setItem(OFFLINE_TOKEN_INDEX(badge), JSON.stringify(tokens));
+    },
+    []
+  );
+
   /* ---------- Jalankan FULL SYNC offline & hold UI sampai selesai ---------- */
   const runFullOfflineSync = useCallback(
-    async (badge: string) => {
+    async (badge: string, pet?: PetugasInfo | null) => {
       const net = await NetInfo.fetch();
       if (!net.isConnected) {
         Alert.alert('Tidak Terhubung', 'Perlu koneksi internet untuk menyiapkan data offline.');
@@ -471,17 +627,50 @@ export const BadgeProvider = ({ children }: { children: ReactNode }) => {
       setIsSyncing(true);
       setSyncProgress(0);
       try {
-        // Langkah 1: prefetch DETAIL (70% progress)
+        if (isRescue(pet?.role)) {
+          // === RESCUE PATH ===
+          // 1) Manifest (ringan)
+          const manifest = await fetchRescueManifest(badge);
+          const tokens = manifest.map(m => m.token_qr).filter(Boolean);
+          const ids = manifest.map(m => m.id_apar).filter((x): x is number => Number.isFinite(x));
+
+          // 2) Details + checklist (bulk)
+          const details = tokens.length ? await fetchRescueDetails(tokens) : [];
+          // simpan untuk scan offline (by token)
+          await persistOfflineDetails(badge, details);
+
+          // (opsional) tetap panggil syncAparOffline agar struktur lokal lama ikut terisi (backward-compatible)
+          await syncAparOffline(badge, {
+            force: true,
+            concurrency: 4,
+            tokensOverride: tokens,
+            onProgress: (p: number) => {
+              // setelah 0.70 gunakan range 0.70..0.80 untuk aparSync
+              const base = 0.70;
+              setSyncProgress(Math.max(base, Math.min(0.80, base + p * 0.10)));
+            },
+          } as any);
+
+          // 3) Status-lite batch
+          await prefetchStatusAndHistory(badge, pet, ids);
+
+          // 4) Done
+          await AsyncStorage.setItem(PRELOAD_FLAG(badge), '1');
+          setSyncProgress(1);
+          return true;
+        }
+
+        // === NON-RESCUE PATH (lama & stabil) ===
+        // 1: prefetch DETAIL via aparSync (70%)
         await syncAparOffline(badge, {
           force: true,
           concurrency: 4,
           onProgress: (p) => setSyncProgress(Math.max(0, Math.min(0.7, p * 0.7))),
         });
 
-        // Langkah 2: STATUS + HISTORY ringan (30% progress)
-        await prefetchStatusAndHistory(badge);
+        // 2: STATUS + HISTORY (30%)
+        await prefetchStatusAndHistory(badge, pet);
 
-        // Simpan flag preload
         await AsyncStorage.setItem(PRELOAD_FLAG(badge), '1');
         setSyncProgress(1);
         return true;
@@ -492,7 +681,7 @@ export const BadgeProvider = ({ children }: { children: ReactNode }) => {
         setIsSyncing(false);
       }
     },
-    [prefetchStatusAndHistory]
+    [fetchRescueDetails, fetchRescueManifest, persistOfflineDetails, prefetchStatusAndHistory]
   );
 
   /* ---------- Set badge + cache + HOLD UI untuk sync ---------- */
@@ -515,7 +704,7 @@ export const BadgeProvider = ({ children }: { children: ReactNode }) => {
       setShowModal(false);
 
       // Jalankan sync penuh—modal global muncul dari sini
-      await runFullOfflineSync(b);
+      await runFullOfflineSync(b, pet ?? null);
     },
     [runFullOfflineSync, validateBadgeWithServer]
   );
@@ -524,7 +713,10 @@ export const BadgeProvider = ({ children }: { children: ReactNode }) => {
   const clearBadgeNumber = useCallback(
     async () => {
       try {
-        if (badgeNumber) await AsyncStorage.removeItem(PRELOAD_FLAG(badgeNumber));
+        if (badgeNumber) {
+          await AsyncStorage.removeItem(PRELOAD_FLAG(badgeNumber));
+          await AsyncStorage.removeItem(OFFLINE_TOKEN_INDEX(badgeNumber));
+        }
       } catch {}
       await AsyncStorage.multiRemove([BADGE_KEY, BADGE_TIMESTAMP_KEY, PETUGAS_INFO_KEY, EMPLOYEE_INFO_KEY]);
       setBadge('');
@@ -542,9 +734,6 @@ export const BadgeProvider = ({ children }: { children: ReactNode }) => {
     const hasLokasi = petugasInfo.lokasiId != null;
     return isRescue(petugasInfo.role) || hasLokasi;
   }, [petugasInfo]);
-
-  // expose ensure ready API (optional, dipakai layar scan untuk token baru)
-  // tetap tersedia via import langsung dari aparSync, tapi konteks ini sudah melakukan preload
 
   if (!ready) return null;
 

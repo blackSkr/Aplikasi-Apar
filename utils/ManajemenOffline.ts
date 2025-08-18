@@ -6,8 +6,11 @@ const QUEUE_KEY = 'OFFLINE_QUEUE';
 
 export interface PendingRequest {
   method: 'POST' | 'PUT' | 'DELETE' | string;
-  path: string;                   // bisa full URL atau path "/api/…"
+  pathOrUrl: string;                   // bisa full URL atau path "/api/…"
   bodyParts?: Array<[string, any]>;
+  headers?: Record<string, string>;    // simpan header penting (Authorization, dsb)
+  queuedAt?: number;
+  attempts?: number;
 }
 
 const log  = (...a: any[]) => { if (__DEV__) console.log('[Offline]', ...a); };
@@ -26,9 +29,9 @@ async function writeQueue(q: PendingRequest[]) {
 
 async function enqueueRequest(req: PendingRequest) {
   const q = await readQueue();
-  q.push(req);
+  q.push({ ...req, queuedAt: Date.now(), attempts: (req.attempts ?? 0) });
   await writeQueue(q);
-  log('enqueue', { method: req.method, path: req.path, parts: req.bodyParts?.length ?? 0 });
+  log('enqueue', { method: req.method, path: req.pathOrUrl, parts: req.bodyParts?.length ?? 0 });
 }
 
 export async function getQueueCount(): Promise<number> {
@@ -40,6 +43,15 @@ export async function getQueueCount(): Promise<number> {
 function toUrl(pathOrUrl: string) {
   const isFullUrl = /^https?:\/\//i.test(pathOrUrl);
   return isFullUrl ? pathOrUrl : `${baseUrl}${pathOrUrl}`;
+}
+
+function normalizeHeaders(h?: HeadersInit): Record<string, string> {
+  const out: Record<string, string> = {};
+  if (!h) return out;
+  if (Array.isArray(h)) for (const [k, v] of h) out[String(k)] = String(v);
+  else if (h instanceof Headers) h.forEach((v, k) => (out[k] = v));
+  else for (const k of Object.keys(h)) out[k] = String((h as any)[k]);
+  return out;
 }
 
 function offlineResponse(
@@ -58,8 +70,8 @@ function offlineResponse(
  *    - network error → { offline:true, reason:'network' }
  * - POST/PUT/DELETE:
  *    - network error → enqueue + { offline:true, reason:'network' }
- *    - 5xx           → enqueue + { offline:true, reason:'server-5xx' }
- *    - else          → return response
+ *    - 5xx/429/503  → enqueue + { offline:true, reason:'server-5xx' }
+ *    - else         → return response
  */
 export async function safeFetchOffline(
   pathOrUrl: string,
@@ -91,14 +103,15 @@ export async function safeFetchOffline(
 
   const enqueueFromOptions = async (reason: 'network' | 'server-5xx') => {
     const parts = extractBodyParts();
-    await enqueueRequest({ method, path: pathOrUrl, bodyParts: parts });
+    const headers = normalizeHeaders(options.headers);
+    await enqueueRequest({ method, pathOrUrl, bodyParts: parts, headers });
     return offlineResponse(reason);
   };
 
   try {
     const res = await fetch(url, options);
     console.log(`[Debug][safeFetchOffline][${method}] status`, res.status);
-    if (res.status >= 500) {
+    if (res.status >= 500 || res.status === 429 || res.status === 503) {
       warn(`${method} got ${res.status} → enqueue for retry`);
       return await enqueueFromOptions('server-5xx');
     }
@@ -122,12 +135,12 @@ export async function flushQueue(): Promise<number> {
 
   for (const req of queue) {
     const method = (req.method || '').toUpperCase();
-    if (!req.path || !['POST', 'PUT', 'DELETE'].includes(method)) {
+    if (!req.pathOrUrl || !['POST', 'PUT', 'DELETE'].includes(method)) {
       console.log('[Debug][flushQueue] drop invalid item', req);
       continue;
     }
 
-    const url = toUrl(req.path);
+    const url = toUrl(req.pathOrUrl);
     const formData = new FormData();
 
     if (Array.isArray(req.bodyParts)) {
@@ -162,20 +175,20 @@ export async function flushQueue(): Promise<number> {
       const res = await fetch(url, {
         method,
         body: formData,
-        headers: { Accept: 'application/json' },
+        headers: { Accept: 'application/json', ...(req.headers || {}) },
       });
       console.log('[Debug][flushQueue] response', res.status);
 
-      if (!res.ok) {
+      if (!res.ok || res.status === 429 || res.status === 503) {
         const text = await res.text().catch(() => '');
         console.warn('[Debug][flushQueue] server response not ok:', res.status, text);
-        remaining.push(req);
+        remaining.push({ ...req, attempts: (req.attempts ?? 0) + 1 });
       } else {
         console.log('[Debug][flushQueue] success', url);
       }
     } catch (err) {
       console.error('[Debug][flushQueue] network error', String(err), '→', url);
-      remaining.push(req);
+      remaining.push({ ...req, attempts: (req.attempts ?? 0) + 1 });
     }
   }
 

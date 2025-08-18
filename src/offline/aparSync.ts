@@ -3,26 +3,62 @@ import { DETAIL_ID_PREFIX, DETAIL_TOKEN_PREFIX, touchDetailKey } from '@/src/cac
 import { baseUrl } from '@/src/config';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
+/* =========================
+   Helpers: token & parsing
+   ========================= */
+const toToken = (s: string) => String(s || '').trim().toLowerCase();
+const isGuid = (s: string) => /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(String(s || '').trim());
+const looksNumeric = (s: string) => /^\d+$/.test(String(s || '').trim());
+
+/** Menerima apa pun dari QR: GUID, ID, atau JSON string */
+export function parseTokenOrId(raw: string | any): { token?: string; id?: number } {
+  try {
+    if (typeof raw === 'string') {
+      const txt = raw.trim();
+      // JSON string?
+      if ((txt.startsWith('{') && txt.endsWith('}')) || (txt.startsWith('"') && txt.endsWith('"'))) {
+        const j = JSON.parse(txt);
+        const t = j?.id ?? j?.token ?? j?.TokenQR ?? j?.qr ?? j?.qrId;
+        const id = j?.id_apar ?? j?.Id ?? j?.peralatanId;
+        if (t && isGuid(String(t))) return { token: String(t) };
+        if (id != null && looksNumeric(String(id))) return { id: Number(id) };
+      }
+      // GUID mentah
+      if (isGuid(txt)) return { token: txt };
+      // ID mentah
+      if (looksNumeric(txt)) return { id: Number(txt) };
+    } else if (raw && typeof raw === 'object') {
+      const t = raw.id ?? raw.token ?? raw.TokenQR ?? raw.qr ?? raw.qrId;
+      const id = raw.id_apar ?? raw.Id ?? raw.peralatanId;
+      if (t && isGuid(String(t))) return { token: String(t) };
+      if (id != null && looksNumeric(String(id))) return { id: Number(id) };
+    }
+  } catch {}
+  return {};
+}
+
+/* =========================
+   Types dari preload
+   ========================= */
 type TokenRow = {
   id_apar: number;
-  token_qr: string;
+  token_qr: string | null;
   kode?: string;
   lokasi_nama?: string;
   jenis_nama?: string;
 };
 
 export type AparSyncOptions = {
-  /** paksa sync walau sudah dilakukan hari ini */
   force?: boolean;
-  /** jumlah request paralel (default 4) */
   concurrency?: number;
-  /** callback progres (0..1) */
   onProgress?: (progress01: number) => void;
 };
 
 const LAST_SYNC_AT = (badge: string) => `OFFLINE_SYNC_AT_${badge}`;
 
-/** GET util aman (abaikan error, balikan null kalau gagal) */
+/* =========================
+   Util HTTP aman
+   ========================= */
 async function tryGetJson<T = any>(url: string): Promise<T | null> {
   try {
     const res = await fetch(url);
@@ -33,9 +69,12 @@ async function tryGetJson<T = any>(url: string): Promise<T | null> {
   }
 }
 
-/** Simpan detail + mapping dengan key standar + sentuh TTL index */
-async function persistDetail(json: any, token?: string | null) {
+/* =========================
+   Persist cache
+   ========================= */
+async function persistDetailInternal(json: any, token?: string | null) {
   if (!json || typeof json !== 'object') return;
+
   const idVal =
     json?.id_apar ?? json?.Id ?? json?.id ??
     (typeof json?.data === 'object' ? (json.data.id_apar ?? json.data.Id ?? json.data.id) : 0);
@@ -43,64 +82,67 @@ async function persistDetail(json: any, token?: string | null) {
 
   const pairs: [string, string][] = [];
   if (id) pairs.push([`${DETAIL_ID_PREFIX}${id}`, JSON.stringify(json)]);
+
   if (token) {
-    pairs.push([`${DETAIL_TOKEN_PREFIX}${token}`, JSON.stringify(json)]);
-    pairs.push([`APAR_TOKEN_${token}`, id]);
+    const tokOrig = String(token);
+    const tokNorm = toToken(tokOrig);
+    // simpan 2 key token agar backward compatible
+    pairs.push([`${DETAIL_TOKEN_PREFIX}${tokOrig}`, JSON.stringify(json)]);
+    if (tokNorm !== tokOrig) pairs.push([`${DETAIL_TOKEN_PREFIX}${tokNorm}`, JSON.stringify(json)]);
+    // mapping token→id pakai NORMAL
+    if (id) pairs.push([`APAR_TOKEN_${tokNorm}`, id]);
   }
+
   if (pairs.length) await AsyncStorage.multiSet(pairs);
 
   if (id) await touchDetailKey(`${DETAIL_ID_PREFIX}${id}`);
-  if (token) await touchDetailKey(`${DETAIL_TOKEN_PREFIX}${token}`);
+  if (token) {
+    const tokOrig = String(token);
+    const tokNorm = toToken(tokOrig);
+    await touchDetailKey(`${DETAIL_TOKEN_PREFIX}${tokOrig}`);
+    if (tokNorm !== tokOrig) await touchDetailKey(`${DETAIL_TOKEN_PREFIX}${tokNorm}`);
+  }
 }
 
-/**
- * Prefetch detail APAR (dari BE mobile) berdasarkan ID.
- * Endpoint tetap: /api/peralatan/with-checklist?id=...&badge=...
- */
-async function prefetchById(id: number, badge: string): Promise<boolean> {
-  const url = `${baseUrl}/api/peralatan/with-checklist?id=${encodeURIComponent(
-    String(id)
-  )}&badge=${encodeURIComponent(badge)}`;
+export const persistDetail = persistDetailInternal;
+
+/* =========================
+   Prefetch by id/token
+   ========================= */
+async function prefetchById(id: number, badge: string, retry = 0): Promise<boolean> {
+  const url = `${baseUrl}/api/peralatan/with-checklist?id=${encodeURIComponent(String(id))}&badge=${encodeURIComponent(badge)}`;
   const json = await tryGetJson<any>(url);
+  if (!json && retry < 1) return prefetchById(id, badge, retry + 1);
   if (!json) return false;
-  await persistDetail(json);
+  await persistDetailInternal(json);
   return true;
 }
 
-/**
- * Prefetch detail APAR berdasarkan TOKEN QR.
- * Endpoint tetap: /api/perawatan/with-checklist/by-token?token=...&badge=...
- */
-async function prefetchByToken(token: string, badge: string): Promise<boolean> {
-  const url = `${baseUrl}/api/perawatan/with-checklist/by-token?token=${encodeURIComponent(
-    token
-  )}&badge=${encodeURIComponent(badge)}`;
+async function prefetchByToken(token: string, badge: string, retry = 0): Promise<boolean> {
+  const t = String(token);
+  const url = `${baseUrl}/api/perawatan/with-checklist/by-token-safe?token=${encodeURIComponent(t)}&badge=${encodeURIComponent(badge)}`;
   const json = await tryGetJson<any>(url);
+  if (!json && retry < 1) return prefetchByToken(t, badge, retry + 1);
   if (!json) return false;
-  await persistDetail(json, token);
+  await persistDetailInternal(json, t);
   return true;
 }
 
-/**
- * Sinkronisasi offline:
- * - Ambil daftar {id_apar, token_qr} untuk petugas
- * - Prefetch detail setiap APAR (pakai ID, fallback TOKEN bila perlu)
- * - Simpan mapping APAR_TOKEN_<token> → <id>
- */
+/* =========================
+   Full sync untuk badge
+   ========================= */
 export async function syncAparOffline(badgeNumber: string, opts: AparSyncOptions = {}) {
   const badge = (badgeNumber || '').trim();
   if (!badge) return;
 
   const { force = false, concurrency = 4, onProgress } = opts;
 
-  // Hindari sync berulang-ulang dalam 1 hari (kecuali force)
   if (!force) {
     const last = Number(await AsyncStorage.getItem(LAST_SYNC_AT(badge))) || 0;
     const oneDay = 24 * 60 * 60 * 1000;
     if (Date.now() - last < oneDay) return;
   }
 
-  // 1) Ambil daftar token/id per petugas
   const listUrl = `${baseUrl}/api/peralatan/tokens-by-badge/${encodeURIComponent(badge)}`;
   const rows = (await tryGetJson<TokenRow[]>(listUrl)) || [];
   if (!rows.length) {
@@ -108,7 +150,13 @@ export async function syncAparOffline(badgeNumber: string, opts: AparSyncOptions
     return;
   }
 
-  // 2) Prefetch dengan concurrency sederhana
+  // simpan mapping token→id lebih awal (pakai NORMAL)
+  for (const r of rows) {
+    const id = Number(r.id_apar);
+    const tok = r.token_qr ? toToken(String(r.token_qr)) : null;
+    if (id && tok) await AsyncStorage.setItem(`APAR_TOKEN_${tok}`, String(id));
+  }
+
   let done = 0;
   const total = rows.length;
   const tick = () => onProgress?.(++done / total);
@@ -122,17 +170,11 @@ export async function syncAparOffline(badgeNumber: string, opts: AparSyncOptions
         while (queue.length) {
           const row = queue.shift()!;
           const id = Number(row.id_apar);
-          const token = String(row.token_qr || '').trim();
+          const tokOrig = row.token_qr ? String(row.token_qr) : null;
 
-          // simpan mapping token→id dulu (agar ScanQr bisa pakai fallback)
-          if (token && id) {
-            await AsyncStorage.setItem(`APAR_TOKEN_${token}`, String(id));
-          }
-
-          // prefetch detail
           let ok = false;
           if (id) ok = await prefetchById(id, badge);
-          if (!ok && token) ok = await prefetchByToken(token, badge);
+          if (!ok && tokOrig) ok = await prefetchByToken(tokOrig, badge);
 
           tick();
         }
@@ -144,38 +186,108 @@ export async function syncAparOffline(badgeNumber: string, opts: AparSyncOptions
   await AsyncStorage.setItem(LAST_SYNC_AT(badge), String(Date.now()));
 }
 
-/**
- * Pastikan 1 token siap offline:
- * - Kalau belum ada cache & sedang online, ambil dari server lalu tulis cache.
- * - Dipakai saat user scan token baru yang belum pernah dibuka.
- */
-export async function ensureAparOfflineReady(tokenOrId: string, badgeNumber: string) {
+/* =========================
+   Offline-first getters
+   ========================= */
+export async function getCachedAparDetail(tokenOrId: string): Promise<any | null> {
+  // Numeric id?
+  if (looksNumeric(tokenOrId)) {
+    const v = await AsyncStorage.getItem(`${DETAIL_ID_PREFIX}${tokenOrId}`);
+    if (v) { await touchDetailKey(`${DETAIL_ID_PREFIX}${tokenOrId}`); return JSON.parse(v); }
+    return null;
+  }
+
+  // token case: cek NORMAL lalu ORIGINAL
+  const tokNorm = toToken(tokenOrId);
+  const v1 = await AsyncStorage.getItem(`${DETAIL_TOKEN_PREFIX}${tokNorm}`);
+  if (v1) { await touchDetailKey(`${DETAIL_TOKEN_PREFIX}${tokNorm}`); return JSON.parse(v1); }
+
+  const v2 = await AsyncStorage.getItem(`${DETAIL_TOKEN_PREFIX}${tokenOrId}`);
+  if (v2) { await touchDetailKey(`${DETAIL_TOKEN_PREFIX}${tokenOrId}`); return JSON.parse(v2); }
+
+  // coba lewat mapping token→id
+  const idMapped = await AsyncStorage.getItem(`APAR_TOKEN_${tokNorm}`);
+  if (idMapped) {
+    const v3 = await AsyncStorage.getItem(`${DETAIL_ID_PREFIX}${idMapped}`);
+    if (v3) { await touchDetailKey(`${DETAIL_ID_PREFIX}${idMapped}`); return JSON.parse(v3); }
+  }
+  return null;
+}
+
+export async function fetchAndCacheAparDetail(tokenOrId: string, badge: string): Promise<any | null> {
+  // jika id
+  if (looksNumeric(tokenOrId)) {
+    try {
+      const url = `${baseUrl}/api/peralatan/with-checklist?id=${encodeURIComponent(tokenOrId)}&badge=${encodeURIComponent(badge)}`;
+      const res = await fetch(url);
+      if (!res.ok) return null;
+      const json = await res.json();
+      await persistDetailInternal(json);
+      return json;
+    } catch { return null; }
+  }
+
+  // token
+  try {
+    const url = `${baseUrl}/api/perawatan/with-checklist/by-token-safe?token=${encodeURIComponent(tokenOrId)}&badge=${encodeURIComponent(badge)}`;
+    const res = await fetch(url);
+    if (!res.ok) return null;
+    const json = await res.json();
+    await persistDetailInternal(json, tokenOrId);
+    return json;
+  } catch { return null; }
+}
+
+export async function getAparDetailOfflineFirst(raw: string, badge: string) {
+  const { token, id } = parseTokenOrId(raw);
+  const key = token ?? (id != null ? String(id) : String(raw));
+
+  const cached = await getCachedAparDetail(key);
+  if (cached) return { data: cached, from: 'cache' as const };
+
+  const online = await fetchAndCacheAparDetail(key, badge);
+  if (online) return { data: online, from: 'network' as const };
+
+  return { data: null, from: 'none' as const };
+}
+
+/* =========================
+   Auto-route helpers
+   ========================= */
+export function shouldAutoGoToHistory(detail: any): boolean {
+  if (!detail) return false;
+  const d = detail?.data && typeof detail.data === 'object' ? detail.data : detail;
+  const last = d?.last_inspection_date ?? null;
+  const canInspect = Number(d?.canInspect ?? 1);
+  return !!last && canInspect === 0;
+}
+
+export function extractAparIdentity(detail: any): { id?: number; no?: string } {
+  const d = detail?.data && typeof detail.data === 'object' ? detail.data : detail;
+  const idRaw =
+    d?.id_apar ?? d?.Id ?? d?.id ?? (typeof d?.peralatan === 'object' ? d?.peralatan?.Id : undefined);
+  const noRaw =
+    d?.no_apar ?? d?.Kode ?? d?.AparKode ?? (typeof d?.peralatan === 'object' ? d?.peralatan?.Kode : undefined);
+  const id = Number(idRaw);
+  return { id: Number.isFinite(id) ? id : undefined, no: noRaw != null ? String(noRaw) : undefined };
+}
+
+/* =========================
+   Ensure ready from scan
+   ========================= */
+export async function ensureAparOfflineReady(raw: string, badgeNumber: string) {
+  const { token, id } = parseTokenOrId(raw);
   const badge = (badgeNumber || '').trim();
   if (!badge) return false;
 
-  // Cek apakah token atau id
-  const looksLikeId = /^\d+$/.test(tokenOrId);
-  if (looksLikeId) {
-    // cek cache ID
-    const v = await AsyncStorage.getItem(`${DETAIL_ID_PREFIX}${tokenOrId}`);
-    if (v) return true;
-    return prefetchById(Number(tokenOrId), badge);
-  }
+  // Sudah ada cache?
+  const existing = await getCachedAparDetail(token ?? (id != null ? String(id) : String(raw)));
+  if (existing) return true;
 
-  // token case
-  const token = tokenOrId;
-  const kToken = `${DETAIL_TOKEN_PREFIX}${token}`;
-  const vToken = await AsyncStorage.getItem(kToken);
-  if (vToken) return true;
+  // Online fetch (bila ada koneksi)
+  if (id != null) return prefetchById(id, badge);
+  if (token) return prefetchByToken(token, badge);
 
-  // ada mapping token→id?
-  const mappedId = await AsyncStorage.getItem(`APAR_TOKEN_${token}`);
-  if (mappedId) {
-    const vId = await AsyncStorage.getItem(`${DETAIL_ID_PREFIX}${mappedId}`);
-    if (vId) return true;
-    return prefetchById(Number(mappedId), badge);
-  }
-
-  // prefetch via token
-  return prefetchByToken(token, badge);
+  // fallback terakhir (tidak ideal, tapi aman)
+  return false;
 }

@@ -1,4 +1,4 @@
-import AsyncStorage from '@react-native-async-storage/async-storage';
+// app/index.tsx  (AparInformasi)
 import NetInfo from '@react-native-community/netinfo';
 import { useFocusEffect } from '@react-navigation/native';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -20,17 +20,12 @@ import Colors from '@/constants/Colors';
 import { useBadge } from '@/context/BadgeContext';
 import { useAparList } from '@/hooks/useAparList';
 import { useOfflineQueue } from '@/hooks/useOfflineQueue';
-import { usePreloadCache } from '@/hooks/usePreloadCache';
 import { router } from 'expo-router';
 
 // Debug & config
 import { __CONFIG_DEBUG__, baseUrl, logApiConfig } from '@/src/config';
 import { installFetchLogger } from '@/src/setupNetworking';
 import { createLogger } from '@/src/utils/logger';
-
-// ⬇️ ADD: initial offline sync
-import InitialSyncModal from '@/components/Sync/InitialSyncModal';
-import { runInitialSync, SyncProgress } from '@/src/services/initialSync';
 
 installFetchLogger();
 const log = createLogger('home');
@@ -59,14 +54,12 @@ async function debugPing(tag: string) {
 
 export default function AparInformasi() {
   const { loading, list, refresh, offlineReason } = useAparList();
-  const { badgeNumber, clearBadgeNumber, petugasInfo, offlineCapable, isEmployeeOnly } = useBadge();
+  const { badgeNumber, clearBadgeNumber, petugasInfo, offlineCapable, isEmployeeOnly, isSyncing } = useBadge();
 
   const { count, isFlushing, refreshQueue, flushNow } = useOfflineQueue({
     autoFlushOnReconnect: false,
     autoFlushOnForeground: false,
   });
-
-  const { status: preloadStatus } = usePreloadCache({ showToast: false });
 
   const [isConnected, setIsConnected] = useState(true);
   const [selectedJenis, setSelectedJenis] = useState<string | null>(null);
@@ -74,15 +67,6 @@ export default function AparInformasi() {
   const [visibleDone, setVisibleDone] = useState(INITIAL_COUNT);
   const [relogKey, setRelogKey] = useState(0);
   const [forceShowFlushCta, setForceShowFlushCta] = useState(false);
-
-  // ⬇️ ADD: modal progress initial sync
-  const [syncVisible, setSyncVisible] = useState(false);
-  const [syncProgress, setSyncProgress] = useState<SyncProgress>({
-    phase: 'prepare',
-    total: 0,
-    done: 0,
-    message: 'Memulai…',
-  });
 
   useEffect(() => {
     (async () => {
@@ -98,14 +82,15 @@ export default function AparInformasi() {
   const refreshQueueRef = useRef(refreshQueue);
   useEffect(() => { refreshQueueRef.current = refreshQueue; }, [refreshQueue]);
 
+  // Hindari refresh saat preload dari BadgeContext masih jalan
   const refreshingRef = useRef(false);
   const refreshSafe = useCallback(async () => {
-    if (preloadStatus === 'running') return;
+    if (isSyncing) return;           // ⬅️ guard: lagi preload offline
     if (refreshingRef.current) return;
     refreshingRef.current = true;
     try { await refresh(); }
     finally { refreshingRef.current = false; }
-  }, [refresh, preloadStatus]);
+  }, [refresh, isSyncing]);
 
   const refreshSafeRef = useRef(refreshSafe);
   useEffect(() => { refreshSafeRef.current = refreshSafe; }, [refreshSafe]);
@@ -139,6 +124,7 @@ export default function AparInformasi() {
     setVisibleDone(INITIAL_COUNT);
   }, [selectedJenis, listByLokasi]);
 
+  // Reconnect handling
   useEffect(() => {
     const unsub = NetInfo.addEventListener(async s => {
       const connected = !!s.isConnected;
@@ -191,58 +177,18 @@ export default function AparInformasi() {
     }, [])
   );
 
+  // Saat preload (isSyncing) selesai → segarkan list
+  const wasSyncingRef = useRef(false);
   useEffect(() => {
-    if (preloadStatus === 'done' || preloadStatus === 'skipped' || preloadStatus === 'error') {
+    if (wasSyncingRef.current && !isSyncing) {
+      // baru saja selesai preload
       refreshSafeRef.current();
     }
-  }, [preloadStatus]);
-
-  // ⬇️ ADD: jalankan initial sync sekali setelah login (offline-capable)
-  useEffect(() => {
-    (async () => {
-      if (!badgeNumber) return;
-      if (!offlineCapable || isEmployeeOnly) return;
-
-      const flagKey = `PRELOAD_FULL_FOR_${badgeNumber}`;
-      const doneFlag = await AsyncStorage.getItem(flagKey);
-      if (doneFlag === '1') return; // sudah pernah sync pada sesi ini
-
-      try {
-        setSyncVisible(true);
-        setSyncProgress({ phase: 'prepare', total: 0, done: 0, message: 'Menyiapkan sinkronisasi…' });
-
-        const result = await runInitialSync(badgeNumber, p => setSyncProgress(p));
-
-        await AsyncStorage.setItem(flagKey, '1');
-
-        if (result.failed > 0) {
-          Alert.alert(
-            'Sinkronisasi Selesai (Sebagian Gagal)',
-            `Berhasil: ${result.success}/${result.total}. Item gagal akan dicoba ulang saat online.`,
-            [{ text: 'OK' }]
-          );
-        }
-
-        // refresh list supaya langsung pakai cache terbaru
-        await refreshSafeRef.current();
-      } catch (e: any) {
-        Alert.alert(
-          'Gagal Menyinkronkan',
-          'Tidak bisa menyiapkan data offline. Data cache lama (jika ada) tetap dipakai.',
-          [{ text: 'OK' }]
-        );
-      } finally {
-        setSyncVisible(false);
-      }
-    })();
-  }, [badgeNumber, offlineCapable, isEmployeeOnly]);
+    wasSyncingRef.current = isSyncing;
+  }, [isSyncing]);
 
   const handleLogout = async () => {
-    if (badgeNumber) {
-      const flagKey = `PRELOAD_FULL_FOR_${badgeNumber}`;
-      await AsyncStorage.removeItem(flagKey);
-    }
-    await clearBadgeNumber();
+    await clearBadgeNumber(); // BadgeContext sudah menghapus PRELOAD flag
   };
 
   const needAll = useMemo(
@@ -404,8 +350,8 @@ export default function AparInformasi() {
         </FloatingBtn>
       )}
 
-      {/* ⬇️ ADD: Modal progress initial sync */}
-      <InitialSyncModal visible={syncVisible} progress={syncProgress} />
+      {/* Tidak ada modal lain di sini. Modal progress sinkronisasi
+          ditangani penuh oleh BadgeContext (BlockingSyncModal). */}
     </Container>
   );
 }

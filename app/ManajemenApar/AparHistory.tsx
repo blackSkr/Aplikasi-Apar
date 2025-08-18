@@ -88,6 +88,12 @@ type HistoryItem = {
 type HistoryResp = { success: boolean; data: HistoryItem[] };
 
 /* =========================
+   Config Optimisasi
+   ========================= */
+const RECENT_DAYS = 180;   // ambil riwayat 6 bulan terakhir
+const HISTORY_LIMIT = 20;  // batasi maksimal N item
+
+/* =========================
    Utils
    ========================= */
 const fmtDate = (iso?: string | null) => {
@@ -114,6 +120,15 @@ const parseNumberParam = (v: string | string[] | undefined) => {
 };
 const parseStringParam = (v: string | string[] | undefined) => (Array.isArray(v) ? v[0] : v) ?? '-';
 
+const withinRecentDays = (iso: string, days: number) => {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return false;
+  const cutoff = new Date();
+  cutoff.setHours(0,0,0,0);
+  cutoff.setDate(cutoff.getDate() - days);
+  return d >= cutoff;
+};
+
 /* =========================
    Main
    ========================= */
@@ -122,6 +137,7 @@ export default function AparHistoryScreen() {
   useLayoutEffect(() => {
     navigation.setOptions({ title: 'Riwayat Inspeksi' });
   }, [navigation]);
+
   const params = useLocalSearchParams<{ id?: string | string[]; no?: string | string[] }>();
   const router = useRouter();
   const aparId = useMemo(() => parseNumberParam(params?.id), [params?.id]);
@@ -180,7 +196,7 @@ export default function AparHistoryScreen() {
           const s: StatusResp = sjson;
           setStatusData(s.data ?? null);
 
-          // 2) details + checklist + photos
+          // 2) details + checklist + photos (hanya jika ada Id status)
           if (s?.data?.Id) {
             const did = s.data.Id;
             const dres = await safeFetchOffline(`${baseUrl}/api/perawatan/details/${did}`, { method: 'GET' });
@@ -205,7 +221,7 @@ export default function AparHistoryScreen() {
           setErrorText(sjson?.message || 'Gagal memuat status.');
         }
 
-        // 3) riwayat list
+        // 3) riwayat list — ambil, lalu filter window waktu + limit
         const hres = await safeFetchOffline(`${baseUrl}/api/perawatan/history/${aparId}`, { method: 'GET' });
         let hjson: any = null;
         try { hjson = await hres.json(); } catch { hjson = null; }
@@ -215,7 +231,12 @@ export default function AparHistoryScreen() {
           setHistory([]);
         } else if (hjson?.success) {
           const h: HistoryResp = hjson;
-          setHistory(Array.isArray(h.data) ? h.data : []);
+          const arr = Array.isArray(h.data) ? h.data : [];
+          // BE sudah order DESC; tetap jaga aman lalu filter recent & limit
+          const recent = arr
+            .filter(it => withinRecentDays(it.TanggalPemeriksaan, RECENT_DAYS))
+            .slice(0, HISTORY_LIMIT);
+          setHistory(recent);
         } else {
           setHistory([]);
           if (!errorText) setErrorText(hjson?.message || 'Gagal memuat riwayat.');
@@ -253,7 +274,7 @@ export default function AparHistoryScreen() {
   const nextDue  = fmtDate(nextDueIso);
   const sisaHari = diffDaysFromToday(nextDueIso);
 
-  const checklist = (details?.checklist ?? []).slice().sort((a, b) => a.Dicentang - b.Dicentang); // Tidak duluan
+  const checklist = (details?.checklist ?? []).slice().sort((a, b) => a.Dicentang - b.Dicentang);
   const totalCL = checklist.length;
   const baikCL  = checklist.filter(c => c.Dicentang === 1).length;
   const tidakCL = totalCL - baikCL;
@@ -285,7 +306,6 @@ export default function AparHistoryScreen() {
   }
 
   return (
-    
     <SafeAreaView style={{ flex: 1, backgroundColor: '#f6f6f6' }}>
       {!!offline && (
         <Banner>
@@ -332,15 +352,6 @@ export default function AparHistoryScreen() {
               </PillValue>
             </Pill>
           </PillRow>
-
-          {/* Stats checklist */}
-          {/* <StatsWrap>
-            <StatBox><StatNum>{totalCL}</StatNum><StatLabel>Total</StatLabel></StatBox>
-            <StatBox><StatNum style={{ color: Colors.success }}>{baikCL}</StatNum><StatLabel>Baik</StatLabel></StatBox>
-            <StatBox><StatNum style={{ color: Colors.error }}>{tidakCL}</StatNum><StatLabel>Tidak</StatLabel></StatBox>
-          </StatsWrap>
-          <ProgressOuter><ProgressInner style={{ width: `${passPct}%` }} /></ProgressOuter>
-          <ProgLabel>{passPct}% lolos</ProgLabel> */}
         </Card>
 
         {/* ===== Info Umum ===== */}
@@ -404,7 +415,7 @@ export default function AparHistoryScreen() {
           </FilterRow>
 
           {filteredHistory.length === 0 ? (
-            <Empty>- Belum ada data -</Empty>
+            <Empty>- Belum ada data (≤ {RECENT_DAYS} hari) -</Empty>
           ) : (
             <View>
               {filteredHistory.map((h) => (
@@ -490,15 +501,6 @@ const Pill = styled.View<{ color?: string; borderColor?: string }>`
 `;
 const PillLabel = styled(Text)`color:${Colors.subtext}; font-size:12px;`;
 const PillValue = styled(Text)`color:${Colors.text}; font-weight:700; margin-top:2px;`;
-
-const StatsWrap = styled.View`flex-direction:row; margin-top:12px;`;
-const StatBox = styled.View`flex:1; align-items:center;`;
-const StatNum = styled(Text)`font-size:20px; font-weight:800; color:${Colors.text};`;
-const StatLabel = styled(Text)`font-size:12px; color:${Colors.subtext}; margin-top:2px;`;
-
-const ProgressOuter = styled.View`height:8px; background:#f1f5f9; border-radius:999px; margin-top:10px; overflow:hidden;`;
-const ProgressInner = styled.View`height:8px; background:${Colors.success};`;
-const ProgLabel = styled(Text)`text-align:right; margin-top:6px; color:${Colors.subtext}; font-size:12px;`;
 
 const Empty = styled(Text)`text-align:center; color:${Colors.subtext}; padding:18px 0;`;
 

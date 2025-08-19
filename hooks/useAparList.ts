@@ -1,11 +1,13 @@
+// hooks/useAparList.ts
 import { useBadge } from '@/context/BadgeContext';
 import {
   DETAIL_ID_PREFIX,
   DETAIL_TOKEN_PREFIX,
   purgeStaleDetails,
-  touchDetailKey,
+  touchDetailKey
 } from '@/src/cacheTTL';
 import { baseUrl } from '@/src/config';
+import { on } from '@/src/utils/EventBus';
 import { safeFetchOffline } from '@/utils/ManajemenOffline';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import NetInfo from '@react-native-community/netinfo';
@@ -21,17 +23,18 @@ export interface AparRaw {
   lokasi_apar?: string;
   jenis_apar?: string;
   statusMaintenance?: MaintenanceStatus;
-  interval_maintenance?: number; // hari
+  interval_maintenance?: number;
   nextDueDate?: string;
   last_inspection?: string;
   tanggal_selesai?: string;
   badge_petugas?: string;
 }
-export interface APAR extends AparRaw { daysRemaining: number; }
+export interface APAR extends AparRaw { daysRemaining: number; pendingUpload?: boolean; }
 
 const CONCURRENCY = 3;
 const PRELOAD_FLAG_PREFIX = 'PRELOAD_FULL_FOR_';
 const APAR_CACHE_KEY = 'APAR_CACHE';
+const PENDING_MAP_KEY = 'OFFLINE_PENDING_APAR_MAP';
 
 const OFFLINE_TOKEN_INDEX = (badge: string) => `OFF_APAR_TOKEN_INDEX_for_${badge}`;
 const OFFLINE_DETAIL_BY_TOKEN = (token: string) => `OFF_APAR_DETAIL_token=${token}`;
@@ -42,7 +45,6 @@ function isRescueRole(role?: string | null) {
   const r = String(role).toLowerCase();
   return r === 'rescue' || r.includes('rescue');
 }
-
 function pickArrayAnywhere(json: any): any[] {
   if (!json) return [];
   if (Array.isArray(json)) return json;
@@ -52,12 +54,9 @@ function pickArrayAnywhere(json: any): any[] {
   if (Array.isArray(json.result?.data)) return json.result.data;
   if (Array.isArray(json.payload?.items)) return json.payload.items;
   if (Array.isArray(json.payload?.data)) return json.payload.data;
-  for (const k of Object.keys(json)) {
-    if (Array.isArray((json as any)[k])) return (json as any)[k];
-  }
+  for (const k of Object.keys(json)) { if (Array.isArray((json as any)[k])) return (json as any)[k]; }
   return [];
 }
-
 function mapRecord(d: any): AparRaw {
   return {
     id_apar: String(d?.id_apar ?? d?.Id ?? d?.ID ?? d?.id ?? ''),
@@ -93,26 +92,40 @@ export function useAparList() {
   const [rawData, setRawData] = useState<AparRaw[]>([]);
   const [offlineReason, setOfflineReason] = useState<OfflineReason>(null);
 
-  // —— gunakan string stabil, bukan object
+  const [pendingMapTick, setPendingMapTick] = useState(0);
+  const pendingMapRef = useRef<Record<string, { id?: string; token?: string; badge?: string; localDoneAt: string }>>({});
+
   const roleStr = useMemo(() => String(petugasInfo?.role ?? ''), [petugasInfo?.role]);
   const rescue = useMemo(() => isRescueRole(roleStr), [roleStr]);
 
-  // —— single-flight guard & request freshness
-  const inFlightRef = useRef<string | null>(null); // key: `${badge}|${role}|${refreshKey}`
+  const inFlightRef = useRef<string | null>(null);
   const latestReqId = useRef(0);
 
-  // —— counter untuk manual refresh; tidak bergantung ke fungsi
   const [refreshKey, setRefreshKey] = useState(0);
   const refresh = useCallback(() => setRefreshKey((x) => x + 1), []);
 
-  // —— simpan offlineReason terakhir di ref (untuk Alert)
   const offlineReasonRef = useRef<OfflineReason>(null);
   useEffect(() => { offlineReasonRef.current = offlineReason; }, [offlineReason]);
 
-  // Bersihkan TTL sekali
   useEffect(() => { purgeStaleDetails().catch(() => {}); }, []);
 
-  // ===== Helpers (stable) =====
+  // ====== EVENT: refresh setelah submit sukses (online / flush)
+  useEffect(() => {
+    const unsub = on('apar:refresh', async () => {
+      // bersihkan cache list agar fetch ambil data terbaru
+      await AsyncStorage.removeItem(APAR_CACHE_KEY).catch(() => {});
+      setRefreshKey((x) => x + 1);
+      // juga paksa baca pending map lagi (barangkali sudah dihapus)
+      try {
+        const raw = (await AsyncStorage.getItem(PENDING_MAP_KEY)) || '{}';
+        pendingMapRef.current = JSON.parse(raw) || {};
+        setPendingMapTick((t) => t + 1);
+      } catch {}
+    });
+    return () => { unsub && (unsub as any)(); };
+  }, []);
+
+  // ===== Helpers =====
   const saveDetailToCache = useCallback(async (detail: any, id: string, token?: string | null) => {
     if (!detail || typeof detail !== 'object') return;
     if (detail.id_apar == null) detail.id_apar = Number(id);
@@ -220,7 +233,7 @@ export function useAparList() {
       const r = await safeFetchOffline(url, { method: 'GET' });
       const j = await r.json().catch(() => null);
       if (!r.ok || !Array.isArray(j) || !j.length) break;
-      allTokens.push(...j.map((x: any) => x?.token_qr).filter(Boolean));
+      allTokens.push(...(j.map((x: any) => x?.token_qr).filter(Boolean)));
       if (j.length < PAGE) break;
     }
     if (!allTokens.length) return [];
@@ -263,9 +276,11 @@ export function useAparList() {
         );
       }
     }
-    await AsyncStorage.setItem(OFFLINE_TOKEN_INDEX(badge), JSON.stringify(allTokens));
+    try {
+      await AsyncStorage.setItem(OFFLINE_TOKEN_INDEX(badge), JSON.stringify(allTokens));
+    } catch {}
 
-    // perkaya via status-lite-batch (opsional)
+    // perkaya via status-lite-batch
     try {
       const ids = mapped.map((m) => parseInt(String(m.id_apar), 10)).filter(Number.isFinite);
       const CHUNK = 200;
@@ -297,9 +312,7 @@ export function useAparList() {
       const json = await r.json().catch(() => null);
 
       if (r.status >= 500) return 'ERROR';
-      if ((json as any)?.offline) {
-        return (json as any)?.reason === 'server-5xx' ? 'ERROR' : 'EMPTY';
-      }
+      if ((json as any)?.offline) return (json as any)?.reason === 'server-5xx' ? 'ERROR' : 'EMPTY';
       if (r.status === 400 || r.status === 404) return 'ERROR';
       if (!r.ok) return 'ERROR';
 
@@ -311,13 +324,29 @@ export function useAparList() {
     }
   }, []);
 
-  // ========== EFFECT TUNGGAL & STABIL: memuat data ==========
+  // ===== Poll pending map (supaya kartu pending hilang setelah flush) =====
   useEffect(() => {
-    // key fetch—stabil; perubahan di luar ini tidak akan memicu ulang
+    let mounted = true;
+    const readPending = async () => {
+      try {
+        const raw = (await AsyncStorage.getItem(PENDING_MAP_KEY)) || '{}';
+        const obj = JSON.parse(raw);
+        if (mounted && obj && typeof obj === 'object') {
+          pendingMapRef.current = obj;
+          setPendingMapTick((t) => t + 1);
+        }
+      } catch {}
+    };
+    readPending();
+    const iv = setInterval(readPending, 5000);
+    return () => { mounted = false; clearInterval(iv); };
+  }, []);
+
+  // ===== Fetch effect utama =====
+  useEffect(() => {
     const badge = badgeNumber;
     const reqKey = `${badge}|${roleStr}|${refreshKey}`;
 
-    // reset bila badge kosong
     if (!badge) {
       inFlightRef.current = null;
       setRawData([]);
@@ -325,16 +354,14 @@ export function useAparList() {
       setLoading(false);
       return;
     }
-
-    // single-flight: bila request key sama, jangan jalan lagi
     if (inFlightRef.current === reqKey) return;
     inFlightRef.current = reqKey;
 
-    let isActive = true; // untuk mengabaikan setState kalau efek sudah unmount/berganti
+    let isActive = true;
     const reqId = ++latestReqId.current;
 
     (async () => {
-      // 1) Hydrate cepat dari cache
+      // hydrate cepat
       try {
         const cached = await AsyncStorage.getItem(APAR_CACHE_KEY);
         if (cached && isActive && reqId === latestReqId.current) {
@@ -346,15 +373,12 @@ export function useAparList() {
         }
       } catch {}
 
-      // 2) Revalidate (primary/rescue)
+      // revalidate
       try {
         let winner: AparRaw[] = [];
         if (rescue) {
           const [primary, rescueList] = await Promise.all([
-            (async () => {
-              const p = await fetchPrimaryList(badge);
-              return Array.isArray(p) ? p : [];
-            })(),
+            (async () => { const p = await fetchPrimaryList(badge); return Array.isArray(p) ? p : []; })(),
             (async () => {
               const fromCache = await buildListFromRescueCache(badge);
               if (fromCache.length) return fromCache;
@@ -395,38 +419,54 @@ export function useAparList() {
           }
         }
       } finally {
-        if (isActive && reqId === latestReqId.current) {
-          setLoading(false);
-        }
+        if (isActive && reqId === latestReqId.current) setLoading(false);
       }
     })();
 
-    // cleanup: biar setState setelah unmount tidak jalan
     return () => { isActive = false; };
   }, [
-    badgeNumber,     // stabil (string)
-    roleStr,         // stabil (string)
-    refreshKey,      // angka counter manual
-    rescue,          // boolean dari roleStr (stabil)
+    badgeNumber,
+    roleStr,
+    refreshKey,
+    rescue,
     fetchPrimaryList,
     buildListFromRescueCache,
     buildListFromRescueBE,
     preloadAllDetailsForBadge,
   ]);
 
-  // ===== Derive daysRemaining =====
+  // ===== Derive list + overlay pending =====
   const list: APAR[] = useMemo(() => {
     const today = new Date(); today.setHours(0, 0, 0, 0);
-    return rawData.map((item) => {
+    const base = rawData.map((item) => {
       let days = 0;
       if ((item as any).nextDueDate) {
         const nd = new Date((item as any).nextDueDate);
         nd.setHours(0, 0, 0, 0);
         days = Math.ceil((nd.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
       }
-      return { ...(item as any), daysRemaining: days };
+      return { ...(item as any), daysRemaining: days } as APAR;
     });
-  }, [rawData]);
+
+    const pmap = pendingMapRef.current || {};
+    if (!pmap || Object.keys(pmap).length === 0) return base;
+
+    const byId = new Map<string, any>();
+    Object.values(pmap).forEach((p: any) => { if (p?.id) byId.set(String(p.id), p); });
+
+    return base.map((it) => {
+      const p = byId.get(String(it.id_apar));
+      if (!p) return it;
+      const doneAt = p.localDoneAt || new Date().toISOString();
+      return {
+        ...it,
+        statusMaintenance: 'Sudah',
+        tanggal_selesai: doneAt,
+        badge_petugas: p.badge || it.badge_petugas,
+        pendingUpload: true,
+      };
+    });
+  }, [rawData, pendingMapTick]);
 
   return { loading, list, refresh, offlineReason };
 }

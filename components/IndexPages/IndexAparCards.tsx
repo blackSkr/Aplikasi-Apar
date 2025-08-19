@@ -1,4 +1,4 @@
-// components/IndexPages/IndexAparCards.tsx - FIXED TEXT RENDERING
+// components/IndexPages/IndexAparCards.tsx
 import { IconSymbol } from '@/components/ui/IconSymbol';
 import Colors from '@/constants/Colors';
 import type { APAR } from '@/hooks/useAparList';
@@ -10,12 +10,25 @@ import styled from 'styled-components/native';
 function getStatusConfig(item: APAR) {
   const days = item.daysRemaining;
   const interval = item.interval_maintenance;
+
+  // PRIORITAS: jika pending upload → tampilkan sebagai "Menunggu Upload"
+  if (item.pendingUpload) {
+    return {
+      color: Colors.primary,
+      icon: 'cloud-upload',
+      text: 'Menunggu data terkirim',
+      subtext: 'Data akan diunggah saat online',
+      badgeText: 'Menunggu Upload',
+    };
+  }
+
   if (item.statusMaintenance === 'Sudah') {
     return {
       color: Colors.success,
       icon: 'checkmark-circle',
       text: 'Selesai',
       subtext: 'Maintenance completed',
+      badgeText: 'Sudah',
     };
   }
   if (days < 0) {
@@ -24,6 +37,7 @@ function getStatusConfig(item: APAR) {
       icon: 'time',
       text: `${Math.abs(days)} hari terlambat`,
       subtext: 'Overdue maintenance',
+      badgeText: 'Belum',
     };
   }
   if (days === 0) {
@@ -32,37 +46,25 @@ function getStatusConfig(item: APAR) {
       icon: 'time',
       text: 'Jatuh tempo hari ini',
       subtext: 'Due today',
-    };
-  }
-  if (days <= Math.ceil(interval * 0.3)) {
-    return {
-      color: Colors.warning,
-      icon: 'time',
-      text: `${days} hari lagi`,
-      subtext: 'Due soon',
+      badgeText: 'Belum',
     };
   }
   return {
-    color: Colors.primary,
+    color: Colors.warning,
     icon: 'time',
     text: `${days} hari lagi`,
-    subtext: 'Scheduled maintenance',
+    subtext: days <= Math.ceil((interval || 30) * 0.3) ? 'Due soon' : 'Scheduled maintenance',
+    badgeText: 'Belum',
   };
 }
 
 function formatDateString(dateString?: string, interval?: number) {
   if (!dateString) return { last: '-', next: '-' };
   const nextDate = new Date(dateString);
-  const lastDate = interval
-    ? new Date(nextDate.getTime() - interval * 86400000)
-    : null;
+  const lastDate = interval ? new Date(nextDate.getTime() - interval * 86400000) : null;
   const fmt = (d?: Date) =>
     d
-      ? d.toLocaleDateString('id-ID', {
-          day: '2-digit',
-          month: 'short',
-          year: 'numeric',
-        })
+      ? d.toLocaleDateString('id-ID', { day: '2-digit', month: 'short', year: 'numeric' })
       : '-';
   return { last: fmt(lastDate), next: fmt(nextDate) };
 }
@@ -71,10 +73,7 @@ export default function IndexAparCard({
   item,
   onPressDetails,
 }: {
-  item: APAR & {
-    badge_petugas?: string;
-    tanggal_selesai?: string;
-  };
+  item: APAR & { badge_petugas?: string; tanggal_selesai?: string };
   onPressDetails: () => void;
 }) {
   const status = useMemo(() => getStatusConfig(item), [item]);
@@ -82,6 +81,7 @@ export default function IndexAparCard({
     () => formatDateString(item.nextDueDate, item.interval_maintenance),
     [item.nextDueDate, item.interval_maintenance]
   );
+
   const progress =
     item.statusMaintenance === 'Sudah'
       ? 1
@@ -89,6 +89,7 @@ export default function IndexAparCard({
       ? Math.min(1, (item.interval_maintenance - item.daysRemaining) / item.interval_maintenance)
       : 0;
 
+  // tanggal untuk kartu "Sudah"/"Pending Upload"
   let tanggalSelesai = '-';
   let tanggalBerikut = '-';
   if (item.statusMaintenance === 'Sudah') {
@@ -115,32 +116,35 @@ export default function IndexAparCard({
   }
 
   const badgePetugas =
-    item.last_petugas_badge ||
+    (item as any).last_petugas_badge ||
     item.badge_petugas ||
-    item.badgeNumber ||
+    (item as any).badgeNumber ||
     '-';
 
-  // CARD SIMPLE: SUDAH MAINTENANCE
+  // ====== Kartu "Sudah" & "Pending Upload" pakai gaya simple (hijau / biru)
   if (item.statusMaintenance === 'Sudah') {
+    const isPending = !!item.pendingUpload;
     return (
-      <SimplePressable 
-        onPress={onPressDetails} 
-        android_ripple={{ color: '#eee' }}
-      >
-        <SimpleWrapper>
-          <SuccessBar />
+      <SimplePressable onPress={onPressDetails} android_ripple={{ color: '#eee' }}>
+        <SimpleWrapper pending={isPending}>
+          <SuccessBar pending={isPending} />
           <SimpleContent>
             <RowTop>
               <SimpleNo>{item.no_apar || 'N/A'}</SimpleNo>
-              <IconSymbol name="checkmark-circle" size={18} color={Colors.success} />
+              <BadgePill color={status.color}>
+                <IconSymbol name={status.icon as any} size={16} color={status.color} />
+                <BadgeText color={status.color}>{status.badgeText}</BadgeText>
+              </BadgePill>
             </RowTop>
+
             <SimpleLocRow>
               <IconSymbol name="location" size={12} color={Colors.subtext} />
               <SimpleLocText>{item.lokasi_apar || 'Lokasi tidak diketahui'}</SimpleLocText>
             </SimpleLocRow>
+
             <DatesRow>
               <DateBlock>
-                <DateLabel>Selesai</DateLabel>
+                <DateLabel>{isPending ? 'Selesai (lokal)' : 'Selesai'}</DateLabel>
                 <DateValueSimple>{tanggalSelesai}</DateValueSimple>
               </DateBlock>
               <DateBlock>
@@ -148,42 +152,43 @@ export default function IndexAparCard({
                 <DateValueSimple>{tanggalBerikut}</DateValueSimple>
               </DateBlock>
             </DatesRow>
+
             <PetugasRow>
               <PetugasLabel>Petugas:</PetugasLabel>
               <PetugasText>{badgePetugas}</PetugasText>
             </PetugasRow>
+
+            {isPending ? (
+              <PendingNote>
+                <IconSymbol name="cloud-upload" size={12} color={Colors.primary} />
+                <PendingText>Menunggu data terkirim saat online…</PendingText>
+              </PendingNote>
+            ) : null}
           </SimpleContent>
         </SimpleWrapper>
       </SimplePressable>
     );
   }
 
-  // CARD DETAIL: BELUM MAINTENANCE
+  // ====== Kartu "Belum"
   return (
-    <CardPressable 
-      onPress={onPressDetails} 
-      android_ripple={{ color: '#eee' }}
-    >
+    <CardPressable onPress={onPressDetails} android_ripple={{ color: '#eee' }}>
       <CardWrapper>
         <StatusBar color={status.color} />
         <CardContent>
           <TopRow>
             <AparNo>{item.no_apar || 'N/A'}</AparNo>
             <BadgeContainer color={status.color}>
-              <IconSymbol name={status.icon} size={15} color={status.color} />
-              <BadgeText color={status.color}>{item.statusMaintenance || 'Belum'}</BadgeText>
+              <IconSymbol name={status.icon as any} size={15} color={status.color} />
+              <BadgeText color={status.color}>{status.badgeText}</BadgeText>
             </BadgeContainer>
           </TopRow>
           <LocationRow>
             <IconSymbol name="location" size={13} color={Colors.subtext} />
             <LocationText>{item.lokasi_apar || 'Lokasi tidak diketahui'}</LocationText>
           </LocationRow>
-          <StatusText color={status.color}>
-            {status.text}
-          </StatusText>
-          <SubStatusText>
-            {status.subtext}
-          </SubStatusText>
+          <StatusText color={status.color}>{status.text}</StatusText>
+          <SubStatusText>{status.subtext}</SubStatusText>
           <ProgressWrap>
             <Progress.Bar
               progress={progress}
@@ -213,8 +218,7 @@ export default function IndexAparCard({
   );
 }
 
-// ========== Styled Components ==========
-// --- Card Belum Maintenance ---
+// ===== Styled =====
 const CardPressable = styled.Pressable`
   margin: 10px 14px 0 14px;
 `;
@@ -255,6 +259,7 @@ const BadgeContainer = styled.View<{ color: string }>`
   padding: 5px 14px;
   border-radius: 20px;
 `;
+const BadgePill = styled(BadgeContainer)``;
 const BadgeText = styled(Text)<{ color: string }>`
   margin-left: 4px;
   font-size: 12px;
@@ -323,15 +328,15 @@ const DateDivider = styled.View`
   opacity: 0.32;
 `;
 
-// --- Card Simple (Sudah Maintenance) ---
+// --- Simple (Sudah / Pending Upload) ---
 const SimplePressable = styled.Pressable`
   margin: 10px 14px 0 14px;
 `;
-const SimpleWrapper = styled.View`
+const SimpleWrapper = styled.View<{ pending?: boolean }>`
   flex-direction: row;
-  background: #f6fff8;
+  background: ${({ pending }) => (pending ? '#f3f7ff' : '#f6fff8')};
   border-radius: 14px;
-  border: 1.2px solid #cde9dc;
+  border: 1.2px solid ${({ pending }) => (pending ? '#c6d8ff' : '#cde9dc')};
   elevation: 1;
   shadow-color: #000;
   shadow-opacity: 0.05;
@@ -339,9 +344,9 @@ const SimpleWrapper = styled.View`
   shadow-radius: 4px;
   overflow: hidden;
 `;
-const SuccessBar = styled.View`
+const SuccessBar = styled.View<{ pending?: boolean }>`
   width: 5px;
-  background-color: ${Colors.success};
+  background-color: ${({ pending }) => (pending ? Colors.primary : Colors.success)};
 `;
 const SimpleContent = styled.View`
   flex: 1;
@@ -406,5 +411,16 @@ const PetugasLabel = styled(Text)`
 const PetugasText = styled(Text)`
   font-size: 12px;
   color: #14614f;
+  font-weight: 600;
+`;
+const PendingNote = styled.View`
+  flex-direction: row;
+  align-items: center;
+  margin-top: 6px;
+`;
+const PendingText = styled(Text)`
+  margin-left: 6px;
+  font-size: 12px;
+  color: ${Colors.primary};
   font-weight: 600;
 `;

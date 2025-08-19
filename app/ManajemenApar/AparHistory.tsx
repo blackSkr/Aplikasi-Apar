@@ -189,7 +189,7 @@ export default function AparHistoryScreen() {
         try { sjson = await sres.json(); } catch { sjson = null; }
 
         if (sjson?.offline) {
-          setOffline(sjson.reason === 'server-5xx' ? 'server-5xx' : 'network');
+          setOffline(prev => prev ?? (sjson.reason === 'server-5xx' ? 'server-5xx' : 'network'));
           setStatusData(null);
           setDetails(null);
         } else if (sjson?.success) {
@@ -204,7 +204,7 @@ export default function AparHistoryScreen() {
             try { djson = await dres.json(); } catch { djson = null; }
 
             if (djson?.offline) {
-              setOffline(djson.reason === 'server-5xx' ? 'server-5xx' : 'network');
+              setOffline(prev => prev ?? (djson.reason === 'server-5xx' ? 'server-5xx' : 'network'));
               setDetails(null);
             } else if (djson?.success) {
               const d: DetailsResp = djson;
@@ -218,7 +218,7 @@ export default function AparHistoryScreen() {
         } else {
           setStatusData(null);
           setDetails(null);
-          setErrorText(sjson?.message || 'Gagal memuat status.');
+          setErrorText(prev => prev ?? (sjson?.message || 'Gagal memuat status.'));
         }
 
         // 3) riwayat list — ambil, lalu filter window waktu + limit
@@ -227,7 +227,7 @@ export default function AparHistoryScreen() {
         try { hjson = await hres.json(); } catch { hjson = null; }
 
         if (hjson?.offline) {
-          if (!offline) setOffline(hjson.reason === 'server-5xx' ? 'server-5xx' : 'network');
+          setOffline(prev => prev ?? (hjson.reason === 'server-5xx' ? 'server-5xx' : 'network'));
           setHistory([]);
         } else if (hjson?.success) {
           const h: HistoryResp = hjson;
@@ -239,7 +239,7 @@ export default function AparHistoryScreen() {
           setHistory(recent);
         } else {
           setHistory([]);
-          if (!errorText) setErrorText(hjson?.message || 'Gagal memuat riwayat.');
+          setErrorText(prev => prev ?? (hjson?.message || 'Gagal memuat riwayat.'));
         }
       } catch {
         setDetails(null);
@@ -250,7 +250,8 @@ export default function AparHistoryScreen() {
         setRefreshing(false);
       }
     },
-    [aparId, badgeNumber, offline, errorText]
+    // ⬇⬇⬇ PENTING: hanya bergantung ke aparId & badgeNumber agar tidak loop
+    [aparId, badgeNumber]
   );
 
   useEffect(() => { load(); }, [load]);

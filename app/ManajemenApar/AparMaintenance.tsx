@@ -3,19 +3,21 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import NetInfo from '@react-native-community/netinfo';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import * as ImagePicker from 'expo-image-picker';
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
   Image,
   Keyboard,
   KeyboardAvoidingView,
-  LayoutAnimation,
+  NativeScrollEvent,
+  NativeSyntheticEvent,
   Platform,
   Pressable,
   ScrollView,
   Text,
   TextInput,
+  TouchableWithoutFeedback,
   View,
 } from 'react-native';
 import styled from 'styled-components/native';
@@ -31,45 +33,7 @@ import { baseUrl } from '@/src/config';
 import { flushQueue, safeFetchOffline } from '@/utils/ManajemenOffline';
 import { useHeaderHeight } from '@react-navigation/elements';
 import { useRouter } from 'expo-router';
-import { useLayoutEffect } from 'react';
-
-/* ===========================
-   HOOK: dynamic keyboard height
-   =========================== */
-function useKeyboardHeight() {
-  const [height, setHeight] = useState(0);
-
-  useEffect(() => {
-    const animate = () => {
-      try {
-        LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
-      } catch {}
-    };
-
-    const onShow = (e: any) => {
-      animate();
-      const h = e?.endCoordinates?.height ?? 0;
-      setHeight(h);
-    };
-
-    const onHide = () => {
-      animate();
-      setHeight(0);
-    };
-
-    const showEvt = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
-    const hideEvt = Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide';
-
-    const subShow = Keyboard.addListener(showEvt, onShow);
-    const subHide = Keyboard.addListener(hideEvt, onHide);
-    return () => {
-      subShow.remove();
-      subHide.remove();
-    };
-  }, []);
-
-  return height;
-}
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 type ChecklistItemState = {
   checklistId?: number;
@@ -89,8 +53,6 @@ type AparData = {
   bulanIntervalPetugas?: number;
   nextDueDate?: string | null;
   keperluan_check: any;
-
-  // field dari endpoint safe
   canInspect?: 0 | 1;
 };
 
@@ -133,8 +95,10 @@ export default function AparMaintenance() {
   }, [navigation]);
 
   const headerHeight = useHeaderHeight();
-  const keyboardHeight = useKeyboardHeight();
+  const insets = useSafeAreaInsets();
   const router = useRouter();
+
+  const scrollRef = useRef<ScrollView | null>(null);
 
   const route = useRoute();
   const { badgeNumber } = useBadge();
@@ -200,7 +164,6 @@ export default function AparMaintenance() {
       setIntervalLabel(`Default (${apar.defaultIntervalBulan} bulan)`);
     }
 
-    // === Guard: jika bukan petugas / tidak boleh inspeksi → pindah ke History
     if (apar.id_apar && (!apar.intervalPetugasId || apar.canInspect === 0)) {
       router.replace({ pathname: '/ManajemenApar/AparHistory', params: { id: String(apar.id_apar), no: apar.no_apar || '' } });
     }
@@ -274,7 +237,6 @@ export default function AparMaintenance() {
 
       const isToken = keyParam.startsWith('token=');
       const path = isToken
-        // ganti ke endpoint SAFE sesuai BE
         ? `${baseUrl}/api/perawatan/with-checklist/by-token-safe?${keyParam}&badge=${encodeURIComponent(badgeNumber||'')}`
         : `${baseUrl}/api/peralatan/with-checklist?${keyParam}&badge=${encodeURIComponent(badgeNumber||'')}`;
 
@@ -300,8 +262,6 @@ export default function AparMaintenance() {
             const msg = (json && json.message) ? json.message : `HTTP ${res.status}`;
             throw new Error(msg);
           }
-
-          // Endpoint SAFE bisa balas {success:true, data:{...}} → ambil data-nya
           const payload = (json && typeof json === 'object' && 'data' in json) ? json.data : json;
           if (!payload || typeof payload !== 'object') throw new Error('Data tidak valid');
 
@@ -423,96 +383,168 @@ export default function AparMaintenance() {
     );
   }
 
-  // padding bawah dinamis = tinggi keyboard + sedikit margin
-  const dynamicBottomPad = (keyboardHeight || 0) + 16;
+  const onScrollBegin = (_e: NativeSyntheticEvent<NativeScrollEvent>) => {
+    // iOS handle by keyboardDismissMode, Android perlu manual
+    if (Platform.OS === 'android') Keyboard.dismiss();
+  };
 
   return (
     <KeyboardAvoidingView
       style={{ flex: 1 }}
-      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-      keyboardVerticalOffset={headerHeight} // offset agar tidak tabrakan dengan header/navbar
+      behavior={Platform.select({ ios: 'padding', android: 'height' })}
+      keyboardVerticalOffset={headerHeight + (insets.top || 0)}
     >
-      <ScrollContainer
-        keyboardShouldPersistTaps="handled"
-        contentContainerStyle={{ paddingBottom: dynamicBottomPad }}
-      >
-        {/* DETAIL APAR */}
-        <Card>
-          <Label>No APAR:</Label>
-          <ReadOnlyInput value={String(data.no_apar ?? '')} />
-          <Label>Lokasi:</Label>
-          <ReadOnlyInput value={String(data.lokasi_apar ?? '')} />
-          <Label>Jenis:</Label>
-          <ReadOnlyInput value={String(data.jenis_apar ?? '')} />
-          <Label>Interval:</Label>
-          <ReadOnlyInput value={String(intervalLabel ?? '—')} />
-          <Label>Next Due:</Label>
-          <ReadOnlyInput value={String(data.nextDueDate ?? '—')} />
-        </Card>
+      {/* Tap area kosong = tutup keyboard */}
+      <TouchableWithoutFeedback onPress={Keyboard.dismiss} accessible={false}>
+        <ScrollContainer
+          ref={scrollRef}
+          keyboardShouldPersistTaps="never"
+          keyboardDismissMode="on-drag"
+          onScrollBeginDrag={onScrollBegin}
+          // tidak ada padding/inset dinamis supaya tidak muncul area abu-abu
+          contentContainerStyle={{ paddingVertical: 8 }}
+        >
+          {/* DETAIL APAR */}
+          <Card>
+            <Label>No APAR:</Label>
+            <ReadOnlyInput value={String(data.no_apar ?? '')} />
+            <Label>Lokasi:</Label>
+            <ReadOnlyInput value={String(data.lokasi_apar ?? '')} />
+            <Label>Jenis:</Label>
+            <ReadOnlyInput value={String(data.jenis_apar ?? '')} />
+            <Label>Interval:</Label>
+            <ReadOnlyInput value={String(intervalLabel ?? '—')} />
+            <Label>Next Due:</Label>
+            <ReadOnlyInput value={String(data.nextDueDate ?? '—')} />
+          </Card>
 
-        {/* CHECKLIST */}
-        <Card>
-          <Label>Checklist Pemeriksaan:</Label>
-          {checklistStates.map((c, i) => (
-            <View key={i} style={{ marginBottom: 16 }}>
-              <QuestionText>{c.item}</QuestionText>
-              <ButtonRow>
-                <Toggle active={c.condition === 'Baik'} onPress={() => updateChecklist(i, { condition: 'Baik' })}>
-                  <ToggleText active={c.condition === 'Baik'}>Baik</ToggleText>
-                </Toggle>
-                <Toggle active={c.condition === 'Tidak Baik'} onPress={() => updateChecklist(i, { condition: 'Tidak Baik' })}>
-                  <ToggleText active={c.condition === 'Tidak Baik'}>Tidak Baik</ToggleText>
-                </Toggle>
-              </ButtonRow>
-              {c.condition === 'Tidak Baik' && (
-                <>
-                  <Label>Alasan:</Label>
-                  <Input
-                    value={c.alasan}
-                    onChangeText={t => updateChecklist(i, { alasan: t })}
-                    placeholder="Jelaskan masalah"
-                    multiline
-                    textAlignVertical="top"
-                    returnKeyType="done"
-                    onSubmitEditing={Keyboard.dismiss}
-                  />
-                </>
-              )}
-            </View>
-          ))}
-        </Card>
+          {/* CHECKLIST */}
+          <Card>
+            <Label>Checklist Pemeriksaan:</Label>
+            {checklistStates.map((c, i) => (
+              <View key={i} style={{ marginBottom: 16 }}>
+                <QuestionText>{c.item}</QuestionText>
+                <ButtonRow>
+                  <Toggle active={c.condition === 'Baik'} onPress={() => updateChecklist(i, { condition: 'Baik' })}>
+                    <ToggleText active={c.condition === 'Baik'}>Baik</ToggleText>
+                  </Toggle>
+                  <Toggle active={c.condition === 'Tidak Baik'} onPress={() => updateChecklist(i, { condition: 'Tidak Baik' })}>
+                    <ToggleText active={c.condition === 'Tidak Baik'}>Tidak Baik</ToggleText>
+                  </Toggle>
+                </ButtonRow>
+                {c.condition === 'Tidak Baik' && (
+                  <>
+                    <Label>Alasan:</Label>
+                    <Input
+                      value={c.alasan}
+                      onChangeText={t => updateChecklist(i, { alasan: t })}
+                      placeholder="Jelaskan masalah"
+                      multiline
+                      textAlignVertical="top"
+                      returnKeyType="done"
+                      blurOnSubmit
+                      onSubmitEditing={Keyboard.dismiss}
+                      onBlur={Keyboard.dismiss}
+                    />
+                  </>
+                )}
+              </View>
+            ))}
+          </Card>
 
-        {/* FOTO */}
-        <Card>
-          <Label>Foto Pemeriksaan:</Label>
-          <Pressable style={uploadStyle} onPress={pickImages}>
-            <Text>Tap untuk pilih foto…</Text>
-          </Pressable>
-          {fotoUris.map((uri, idx) => (
-            <Image key={idx} source={{ uri }} style={{ width: 100, height: 100, marginBottom: 8 }} />
-          ))}
-        </Card>
+          {/* FOTO */}
+          <Card>
+            <Label>Foto Pemeriksaan:</Label>
+            <Pressable style={uploadStyle} onPress={pickImages}>
+              <Text>Tap untuk pilih foto…</Text>
+            </Pressable>
+            {fotoUris.map((uri, idx) => (
+              <Image key={idx} source={{ uri }} style={{ width: 100, height: 100, marginBottom: 8 }} />
+            ))}
+          </Card>
 
-        {/* FORM TAMBAHAN */}
-        <Card>
-          <Label>Kondisi Umum:</Label>
-          <Input value={kondisi} onChangeText={setKondisi} placeholder="Masukkan kondisi umum" />
-          <Label>Catatan Masalah:</Label>
-          <Input value={catatanMasalah} onChangeText={setCatatanMasalah} placeholder="Masukkan catatan masalah" multiline textAlignVertical="top" />
-          <Label>Rekomendasi:</Label>
-          <Input value={rekomendasi} onChangeText={setRekomendasi} placeholder="Masukkan rekomendasi" multiline textAlignVertical="top" />
-          <Label>Tindak Lanjut:</Label>
-          <Input value={tindakLanjut} onChangeText={setTindakLanjut} placeholder="Masukkan tindak lanjut" multiline textAlignVertical="top" />
-          <Label>Tekanan (bar):</Label>
-          <Input value={tekanan} onChangeText={setTekanan} placeholder="Masukkan tekanan" keyboardType="numeric" />
-          <Label>Jumlah Masalah:</Label>
-          <Input value={jumlahMasalah} onChangeText={setJumlahMasalah} placeholder="Masukkan jumlah masalah" keyboardType="numeric" />
-        </Card>
+          {/* FORM TAMBAHAN */}
+          <Card>
+            <Label>Kondisi Umum:</Label>
+            <Input
+              value={kondisi}
+              onChangeText={setKondisi}
+              placeholder="Masukkan kondisi umum"
+              returnKeyType="done"
+              blurOnSubmit
+              onSubmitEditing={Keyboard.dismiss}
+              onBlur={Keyboard.dismiss}
+            />
 
-        <SubmitButton disabled={submitting} onPress={handleSubmit}>
-          {submitting ? <ActivityIndicator color="#fff" /> : <SubmitText>Simpan Maintenance</SubmitText>}
-        </SubmitButton>
-      </ScrollContainer>
+            <Label>Catatan Masalah:</Label>
+            <Input
+              value={catatanMasalah}
+              onChangeText={setCatatanMasalah}
+              placeholder="Masukkan catatan masalah"
+              multiline
+              textAlignVertical="top"
+              returnKeyType="done"
+              blurOnSubmit
+              onSubmitEditing={Keyboard.dismiss}
+              onBlur={Keyboard.dismiss}
+            />
+
+            <Label>Rekomendasi:</Label>
+            <Input
+              value={rekomendasi}
+              onChangeText={setRekomendasi}
+              placeholder="Masukkan rekomendasi"
+              multiline
+              textAlignVertical="top"
+              returnKeyType="done"
+              blurOnSubmit
+              onSubmitEditing={Keyboard.dismiss}
+              onBlur={Keyboard.dismiss}
+            />
+
+            <Label>Tindak Lanjut:</Label>
+            <Input
+              value={tindakLanjut}
+              onChangeText={setTindakLanjut}
+              placeholder="Masukkan tindak lanjut"
+              multiline
+              textAlignVertical="top"
+              returnKeyType="done"
+              blurOnSubmit
+              onSubmitEditing={Keyboard.dismiss}
+              onBlur={Keyboard.dismiss}
+            />
+
+            <Label>Tekanan (bar):</Label>
+            <Input
+              value={tekanan}
+              onChangeText={setTekanan}
+              placeholder="Masukkan tekanan"
+              keyboardType="numeric"
+              returnKeyType="done"
+              blurOnSubmit
+              onSubmitEditing={Keyboard.dismiss}
+              onBlur={Keyboard.dismiss}
+            />
+
+            <Label>Jumlah Masalah:</Label>
+            <Input
+              value={jumlahMasalah}
+              onChangeText={setJumlahMasalah}
+              placeholder="Masukkan jumlah masalah"
+              keyboardType="numeric"
+              returnKeyType="done"
+              blurOnSubmit
+              onSubmitEditing={Keyboard.dismiss}
+              onBlur={Keyboard.dismiss}
+            />
+          </Card>
+
+          <SubmitButton disabled={submitting} onPress={handleSubmit}>
+            {submitting ? <ActivityIndicator color="#fff" /> : <SubmitText>Simpan Maintenance</SubmitText>}
+          </SubmitButton>
+        </ScrollContainer>
+      </TouchableWithoutFeedback>
     </KeyboardAvoidingView>
   );
 }
@@ -520,8 +552,7 @@ export default function AparMaintenance() {
 // ========== STYLED ==========
 const Centered = styled(View)` flex: 1; justify-content: center; align-items: center; padding: 20px; `;
 const ScrollContainer = styled(ScrollView).attrs({
-  // penting supaya tap pada input tetap fokus walau keyboard terbuka
-  keyboardShouldPersistTaps: 'handled',
+  keyboardShouldPersistTaps: 'never',
 })` flex: 1; background-color: #f9fafb; `;
 const Card = styled(View)` background: #fff; margin: 12px 16px; padding: 16px; border-radius: 8px; elevation: 2; `;
 const Label = styled(Text)` font-size: 14px; font-weight: 600; color: #374151; margin-bottom: 8px; margin-top: 4px; `;
@@ -540,6 +571,8 @@ const Input = styled(TextInput).attrs({
   placeholderTextColor: '#9CA3AF',
   selectionColor: '#dc2626',
   cursorColor: '#dc2626',
+  autoCapitalize: 'sentences',
+  autoCorrect: false,
 })`
   background: #fff;
   border: 1px solid #d1d5db;

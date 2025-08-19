@@ -4,7 +4,7 @@
     "slug": "AparApps",
     "version": "1.0.0",
     "orientation": "portrait",
-    "icon": "./assets/images/icon.png",
+    "icon": "./assets/images/kpc-logo.png",
     "scheme": "aparapps",
     "userInterfaceStyle": "automatic",
     "newArchEnabled": false,
@@ -23,6 +23,7 @@
         "foregroundImage": "./assets/images/adaptive-icon.png",
         "backgroundColor": "#ffffff"
       },
+      "softwareKeyboardLayoutMode": "resize",
       "edgeToEdgeEnabled": true,
       "permissions": ["android.permission.CAMERA"]
     },

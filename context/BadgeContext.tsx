@@ -1,4 +1,3 @@
-// src/context/BadgeContext.tsx
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import NetInfo from '@react-native-community/netinfo';
 import React, {
@@ -65,14 +64,13 @@ const PRELOAD_FLAG = (badge: string) => `PRELOAD_FULL_FOR_${badge}`;
 export const getPreloadFlagKey = PRELOAD_FLAG;
 
 // cache tambahan untuk status/history (dipakai saat offline)
-const STATUS_KEY = (id: number) => `APAR_STATUS_id=${id}`;   // value: StatusResp['data'] | null
-const HISTORY_KEY = (id: number) => `APAR_HISTORY_id=${id}`; // value: HistoryItem[] (dibatasi)
+const STATUS_KEY = (id: number) => `APAR_STATUS_id=${id}`;
+const HISTORY_KEY = (id: number) => `APAR_HISTORY_id=${id}`;
 
 // cache baru utk offline scan (by token)
 const OFFLINE_DETAIL_BY_TOKEN = (token: string) => `OFF_APAR_DETAIL_token=${token}`;
-// indeks token agar pencarian offline cepat
-const OFFLINE_TOKEN_INDEX = (badge: string) => `OFF_APAR_TOKEN_INDEX_for_${badge}`; // string[] of tokens
-const OFFLINE_TOKEN_TO_ID = (token: string) => `OFF_TOKEN_TO_ID_${token}`; // number
+const OFFLINE_TOKEN_INDEX = (badge: string) => `OFF_APAR_TOKEN_INDEX_for_${badge}`;
+const OFFLINE_TOKEN_TO_ID = (token: string) => `OFF_TOKEN_TO_ID_${token}`;
 
 /* =========================
    BE response types (ringkas)
@@ -123,6 +121,21 @@ type OfflineDetail = {
   nextDueDate: string | null;
   daysUntilDue: number | null;
   checklist: { checklistId: number; Pertanyaan: string }[];
+};
+
+/* =========================
+   Utils (normalisasi id/teks)
+   ========================= */
+const normalizeId = (v: unknown): number | null => {
+  // terima string/number/bool/null, hasil valid kalau > 0
+  const n = Number(String(v ?? '').trim());
+  if (!Number.isFinite(n)) return null;
+  return n > 0 ? n : null;
+};
+const normalizeText = (v: unknown): string | null => {
+  if (v == null) return null;
+  const s = String(v).trim();
+  return s.length ? s : null;
 };
 
 /* =========================
@@ -199,28 +212,9 @@ function BlockingSyncModal({ visible, progress = 0 }: { visible: boolean; progre
           <Text style={{ marginTop: 12, fontWeight: '600', color: '#111' }}>
             Menyiapkan data offline… ({pct}%)
           </Text>
-
-          {/* progress bar */}
-          <View
-            style={{
-              width: '100%',
-              height: 8,
-              backgroundColor: '#e5e7eb',
-              borderRadius: 6,
-              marginTop: 12,
-              overflow: 'hidden',
-            }}
-          >
-            <View
-              style={{
-                width: `${pct}%`,
-                height: '100%',
-                backgroundColor: '#D50000',
-                borderRadius: 6,
-              }}
-            />
+          <View style={{ width: '100%', height: 8, backgroundColor: '#e5e7eb', borderRadius: 6, marginTop: 12, overflow: 'hidden' }}>
+            <View style={{ width: `${pct}%`, height: '100%', backgroundColor: '#D50000', borderRadius: 6 }} />
           </View>
-
           <Text style={{ marginTop: 8, fontSize: 12, color: '#6b7280', textAlign: 'center' }}>
             Mohon tunggu hingga selesai agar scan & maintenance bisa berfungsi saat offline.
           </Text>
@@ -233,8 +227,8 @@ function BlockingSyncModal({ visible, progress = 0 }: { visible: boolean; progre
 /* =========================
    Provider
    ========================= */
-const HISTORY_LIMIT = 1;      // berapa item riwayat terbaru yang diprefetch
-const CONCURRENCY_STATUS = 5; // concurrency untuk status/history
+const HISTORY_LIMIT = 1;
+const CONCURRENCY_STATUS = 5;
 
 // rescue flow
 const MANIFEST_PAGE_SIZE = 300;
@@ -256,10 +250,10 @@ export const BadgeProvider = ({ children }: { children: ReactNode }) => {
   const toEmployeeInfo = useCallback(
     (badge: string, raw: any): EmployeeInfo => ({
       badge,
-      nama: raw?.Nama ?? raw?.nama ?? raw?.EmployeeName ?? null,
-      divisi: raw?.Divisi ?? raw?.divisi ?? null,
-      departemen: raw?.Departemen ?? raw?.departemen ?? null,
-      status: raw?.Status ?? raw?.status ?? null,
+      nama: normalizeText(raw?.Nama ?? raw?.nama ?? raw?.EmployeeName),
+      divisi: normalizeText(raw?.Divisi ?? raw?.divisi),
+      departemen: normalizeText(raw?.Departemen ?? raw?.departemen),
+      status: normalizeText(raw?.Status ?? raw?.status),
     }),
     []
   );
@@ -268,31 +262,40 @@ export const BadgeProvider = ({ children }: { children: ReactNode }) => {
     const role =
       raw?.Role ?? raw?.role ?? raw?.petugas?.Role ?? raw?.petugas?.role ?? raw?.NamaRole ?? null;
 
-    // dukungan nama field lokasi (berbagai casing)
+    // dukungan nama field lokasi (semua variasi umum)
     const lokasiId =
-      raw?.LokasiId ?? raw?.lokasiId ?? raw?.IdLokasi ?? raw?.IDLokasi ??
-      raw?.id_lokasi ?? raw?.petugas?.LokasiId ?? raw?.lokasi?.Id ?? null;
+      normalizeId(
+        raw?.LokasiId ?? raw?.lokasiId ?? raw?.IdLokasi ?? raw?.IDLokasi ??
+        raw?.LokasiID ?? raw?.lokasi_id ?? raw?.LocationId ??
+        raw?.id_lokasi ?? raw?.petugas?.LokasiId ?? raw?.lokasi?.Id
+      );
 
     const lokasiNama =
-      raw?.LokasiNama ?? raw?.lokasiNama ?? raw?.NamaLokasi ?? raw?.nama_lokasi ??
-      raw?.lokasi?.Nama ?? raw?.lokasi?.nama ?? raw?.Lokasi ?? raw?.lokasi ?? null;
+      normalizeText(
+        raw?.LokasiNama ?? raw?.lokasiNama ?? raw?.NamaLokasi ?? raw?.nama_lokasi ??
+        raw?.lokasi?.Nama ?? raw?.lokasi?.nama ?? raw?.Lokasi ?? raw?.lokasi
+      );
 
-    const intervalId =
-      raw?.IntervalPetugasId ?? raw?.intervalPetugasId ?? raw?.petugas?.IntervalPetugasId ?? null;
+    const intervalId = normalizeId(
+      raw?.IntervalPetugasId ?? raw?.intervalPetugasId ?? raw?.petugas?.IntervalPetugasId
+    );
 
-    const intervalNama =
-      raw?.IntervalNama ?? raw?.intervalNama ?? raw?.NamaInterval ?? intervalDetail?.NamaInterval ?? intervalDetail?.namaInterval ?? null;
-    const intervalBulanNum =
-      raw?.IntervalBulan ?? raw?.intervalBulan ?? intervalDetail?.Bulan ?? intervalDetail?.bulan ?? null;
+    const intervalNama = normalizeText(
+      raw?.IntervalNama ?? raw?.intervalNama ?? raw?.NamaInterval ??
+      intervalDetail?.NamaInterval ?? intervalDetail?.namaInterval
+    );
+    const intervalBulanNum = normalizeId(
+      raw?.IntervalBulan ?? raw?.intervalBulan ?? intervalDetail?.Bulan ?? intervalDetail?.bulan
+    );
 
     return {
       badge,
-      role: role ?? null,
-      lokasiId: lokasiId != null ? Number(lokasiId) : null,
-      lokasiNama: lokasiNama ?? null,
-      intervalId: intervalId != null ? Number(intervalId) : null,
-      intervalNama: intervalNama ?? null,
-      intervalBulan: intervalBulanNum != null ? Number(intervalBulanNum) : null,
+      role: normalizeText(role),
+      lokasiId,
+      lokasiNama,
+      intervalId,
+      intervalNama,
+      intervalBulan: intervalBulanNum,
     };
   }, []);
 
@@ -378,16 +381,16 @@ export const BadgeProvider = ({ children }: { children: ReactNode }) => {
   const mapFromBadgeMode = useCallback((badge: string, raw: any): PetugasInfo => {
     return {
       badge,
-      role: raw?.role ?? null,
-      lokasiId: raw?.lokasiId != null ? Number(raw?.lokasiId) : null,
-      lokasiNama: raw?.lokasiNama ?? null,
-      intervalId: raw?.intervalId != null ? Number(raw?.intervalId) : null,
-      intervalNama: raw?.intervalNama ?? null,
-      intervalBulan: raw?.intervalBulan != null ? Number(raw?.intervalBulan) : null,
+      role: normalizeText(raw?.role),
+      lokasiId: normalizeId(raw?.lokasiId ?? raw?.LokasiId ?? raw?.lokasi_id ?? raw?.LokasiID),
+      lokasiNama: normalizeText(raw?.lokasiNama ?? raw?.LokasiNama),
+      intervalId: normalizeId(raw?.intervalId ?? raw?.IntervalPetugasId),
+      intervalNama: normalizeText(raw?.intervalNama ?? raw?.NamaInterval),
+      intervalBulan: normalizeId(raw?.intervalBulan ?? raw?.IntervalBulan),
     };
   }, []);
 
-  /* ---------- VALIDASI: Employee → Petugas (dengan fallback) ---------- */
+  /* ---------- VALIDASI: Employee → Petugas (dengan fallback & merge) ---------- */
   const validateBadgeWithServer = useCallback(
     async (badge: string) => {
       setValidating(true);
@@ -408,34 +411,45 @@ export const BadgeProvider = ({ children }: { children: ReactNode }) => {
         }
         const emp = toEmployeeInfo(badge, empResp.json);
 
-        // 2) Petugas (lama)
+        // 2) Petugas (utama)
         const petResp = await getJson(`${baseUrl}/api/petugas/lokasi/${encodeURIComponent(badge)}`);
-        if (petResp.offline) {
-          Alert.alert('Gagal Verifikasi', 'Server bermasalah / offline.');
-          return { emp, pet: null } as const;
-        }
+        let pet: PetugasInfo | null = null;
 
-        if ((petResp.res as any).ok && petResp.json) {
+        if (!petResp.offline && (petResp.res as any).ok && petResp.json) {
           const rawIntervalId =
             petResp.json?.IntervalPetugasId ??
             petResp.json?.intervalPetugasId ??
             petResp.json?.petugas?.IntervalPetugasId ??
             null;
+
           const intervalDetail = await fetchIntervalDetailIfNeeded(
             rawIntervalId ? Number(rawIntervalId) : null
           );
-          const pet = toPetugasInfo(badge, petResp.json, intervalDetail);
-          return { emp, pet } as const;
+          pet = toPetugasInfo(badge, petResp.json, intervalDetail);
         }
 
-        // 3) Fallback baru (non-breaking)
-        const fbResp = await getJson(`${baseUrl}/api/lokasi/by-badge/${encodeURIComponent(badge)}/mode`);
-        if ((fbResp.res as any).ok && fbResp.json && !fbResp.offline) {
-          const pet = mapFromBadgeMode(badge, fbResp.json);
-          return { emp, pet } as const;
+        // 3) Fallback/merge jika lokasiId tidak valid namun badge sebenarnya punya lokasi
+        if ((!pet || !normalizeId(pet.lokasiId)) && !isRescue(pet?.role)) {
+          const fbResp = await getJson(`${baseUrl}/api/lokasi/by-badge/${encodeURIComponent(badge)}/mode`);
+          if (!fbResp.offline && (fbResp.res as any).ok && fbResp.json) {
+            const fromFb = mapFromBadgeMode(badge, fbResp.json);
+            // merge tanpa menimpa data yang sudah valid
+            pet = {
+              badge,
+              role: pet?.role ?? fromFb.role ?? null,
+              lokasiId: normalizeId(pet?.lokasiId) ?? normalizeId(fromFb.lokasiId),
+              lokasiNama: pet?.lokasiNama ?? fromFb.lokasiNama ?? null,
+              intervalId: normalizeId(pet?.intervalId) ?? normalizeId(fromFb.intervalId),
+              intervalNama: pet?.intervalNama ?? fromFb.intervalNama ?? null,
+              intervalBulan: normalizeId(pet?.intervalBulan) ?? normalizeId(fromFb.intervalBulan),
+            };
+          }
         }
 
-        return { emp, pet: null } as const;
+        // (opsional) log ringan untuk diagnosa di perangkat (tidak crash)
+        // console.log('[Badge] mapped petugas:', pet);
+
+        return { emp, pet } as const;
       } catch (e: any) {
         Alert.alert('Gagal Verifikasi', e?.message || 'Error');
         return { emp: null, pet: null } as const;
@@ -461,7 +475,6 @@ export const BadgeProvider = ({ children }: { children: ReactNode }) => {
         all.push(...batch);
         if (batch.length < MANIFEST_PAGE_SIZE) break;
         page++;
-        // update progress kecil (hingga 15%)
         setSyncProgress((p) => Math.min(0.15, p + 0.02));
       }
       return all;
@@ -482,8 +495,7 @@ export const BadgeProvider = ({ children }: { children: ReactNode }) => {
         if ((r.res as any).ok && Array.isArray(r.json)) {
           collected.push(...(r.json as OfflineDetail[]));
         }
-        // update progress details (hingga 55%)
-        const start = 0.15, end = 0.70; // manifest 0-0.15, details 0.15-0.70
+        const start = 0.15, end = 0.70;
         const frac = (i + 1) / chunks.length;
         setSyncProgress(start + (end - start) * frac);
       }
@@ -496,7 +508,6 @@ export const BadgeProvider = ({ children }: { children: ReactNode }) => {
   const prefetchStatusAndHistory = useCallback(
     async (badge: string, pet?: PetugasInfo | null, idsIfRescue?: number[]) => {
       if (isRescue(pet?.role)) {
-        // Rescue: status-lite-batch (lebih ringan). History bisa dilewati/opsional.
         const ids = Array.isArray(idsIfRescue) ? idsIfRescue : [];
         if (!ids.length) return;
 
@@ -513,7 +524,6 @@ export const BadgeProvider = ({ children }: { children: ReactNode }) => {
             for (const row of q.json) {
               const id = Number(row?.aparId ?? row?.Id ?? 0);
               if (!id) continue;
-              // Samakan bentuk dengan StatusResp.data agar konsumsi UI konsisten
               const data = {
                 Id: row?.Id ?? null,
                 TanggalPemeriksaan: row?.TanggalPemeriksaan ?? null,
@@ -534,11 +544,9 @@ export const BadgeProvider = ({ children }: { children: ReactNode }) => {
           const frac = processed / Math.max(1, ids.length);
           setSyncProgress(start + (end - start) * frac);
         }
-        // history rescue (opsional ringan) — skip agar cepat
         return;
       }
 
-      // Non-rescue (lama): pakai tokens-by-badge lalu loop status+history
       const r = await getJson(`${baseUrl}/api/peralatan/tokens-by-badge/${encodeURIComponent(badge)}`);
       if (!(r.res as any).ok || !Array.isArray(r.json)) return;
 
@@ -572,7 +580,6 @@ export const BadgeProvider = ({ children }: { children: ReactNode }) => {
                   await AsyncStorage.setItem(STATUS_KEY(id), JSON.stringify(sjson.data ?? null));
                 }
 
-                // history terbatas
                 const hres = await safeFetchOffline(`${baseUrl}/api/perawatan/history/${id}`, { method: 'GET' });
                 const hjson: { success: boolean; data: HistoryItem[] } | any = await (hres as any).json().catch(() => null);
                 if (hjson && (hres as any).ok && !hjson?.offline && Array.isArray(hjson.data)) {
@@ -628,47 +635,35 @@ export const BadgeProvider = ({ children }: { children: ReactNode }) => {
       setSyncProgress(0);
       try {
         if (isRescue(pet?.role)) {
-          // === RESCUE PATH ===
-          // 1) Manifest (ringan)
           const manifest = await fetchRescueManifest(badge);
           const tokens = manifest.map(m => m.token_qr).filter(Boolean);
           const ids = manifest.map(m => m.id_apar).filter((x): x is number => Number.isFinite(x));
 
-          // 2) Details + checklist (bulk)
           const details = tokens.length ? await fetchRescueDetails(tokens) : [];
-          // simpan untuk scan offline (by token)
           await persistOfflineDetails(badge, details);
 
-          // (opsional) tetap panggil syncAparOffline agar struktur lokal lama ikut terisi (backward-compatible)
           await syncAparOffline(badge, {
             force: true,
             concurrency: 4,
             tokensOverride: tokens,
             onProgress: (p: number) => {
-              // setelah 0.70 gunakan range 0.70..0.80 untuk aparSync
               const base = 0.70;
               setSyncProgress(Math.max(base, Math.min(0.80, base + p * 0.10)));
             },
           } as any);
 
-          // 3) Status-lite batch
           await prefetchStatusAndHistory(badge, pet, ids);
-
-          // 4) Done
           await AsyncStorage.setItem(PRELOAD_FLAG(badge), '1');
           setSyncProgress(1);
           return true;
         }
 
-        // === NON-RESCUE PATH (lama & stabil) ===
-        // 1: prefetch DETAIL via aparSync (70%)
         await syncAparOffline(badge, {
           force: true,
           concurrency: 4,
           onProgress: (p) => setSyncProgress(Math.max(0, Math.min(0.7, p * 0.7))),
         });
 
-        // 2: STATUS + HISTORY (30%)
         await prefetchStatusAndHistory(badge, pet);
 
         await AsyncStorage.setItem(PRELOAD_FLAG(badge), '1');
@@ -703,7 +698,6 @@ export const BadgeProvider = ({ children }: { children: ReactNode }) => {
       setPetugasInfo(pet ?? null);
       setShowModal(false);
 
-      // Jalankan sync penuh—modal global muncul dari sini
       await runFullOfflineSync(b, pet ?? null);
     },
     [runFullOfflineSync, validateBadgeWithServer]
@@ -731,7 +725,7 @@ export const BadgeProvider = ({ children }: { children: ReactNode }) => {
   const isEmployeeOnly = useMemo(() => !!(!petugasInfo && employeeInfo), [petugasInfo, employeeInfo]);
   const offlineCapable = useMemo(() => {
     if (!petugasInfo) return false;
-    const hasLokasi = petugasInfo.lokasiId != null;
+    const hasLokasi = normalizeId(petugasInfo.lokasiId) !== null;
     return isRescue(petugasInfo.role) || hasLokasi;
   }, [petugasInfo]);
 

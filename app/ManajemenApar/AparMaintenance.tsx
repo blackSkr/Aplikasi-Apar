@@ -3,13 +3,13 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import NetInfo from '@react-native-community/netinfo';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import * as ImagePicker from 'expo-image-picker';
+import * as Location from 'expo-location';
 import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
   Image,
   Keyboard,
-  KeyboardAvoidingView,
   NativeScrollEvent,
   NativeSyntheticEvent,
   Platform,
@@ -31,10 +31,10 @@ import {
 } from '@/src/cacheTTL';
 import { baseUrl } from '@/src/config';
 import { flushQueue, safeFetchOffline } from '@/utils/ManajemenOffline';
-import { useHeaderHeight } from '@react-navigation/elements';
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+/* ============ Types ============ */
 type ChecklistItemState = {
   checklistId?: number;
   item: string;
@@ -90,16 +90,14 @@ function normalizeApar(raw: any): AparData {
 
 export default function AparMaintenance() {
   const navigation = useNavigation();
-  useLayoutEffect(() => {
-    navigation.setOptions({ title: 'Inspeksi Alat' });
-  }, [navigation]);
+  useLayoutEffect(() => { navigation.setOptions({ title: 'Inspeksi Alat' }); }, [navigation]);
 
-  const headerHeight = useHeaderHeight();
   const insets = useSafeAreaInsets();
   const router = useRouter();
 
   const scrollRef = useRef<ScrollView | null>(null);
 
+  /* ---------- Route & states ---------- */
   const route = useRoute();
   const { badgeNumber } = useBadge();
   const { refreshQueue } = useOfflineQueue();
@@ -124,6 +122,36 @@ export default function AparMaintenance() {
   const [tekanan, setTekanan] = useState('');
   const [jumlahMasalah, setJumlahMasalah] = useState('');
 
+  // Refs (tanpa auto-focus / autoscroll)
+  const alasanRefs = useRef<Array<React.RefObject<TextInput>>>([]);
+  const kondisiRef = useRef<TextInput>(null);
+  const catatanRef = useRef<TextInput>(null);
+  const rekomRef = useRef<TextInput>(null);
+  const tindakRef = useRef<TextInput>(null);
+  const tekananRef = useRef<TextInput>(null);
+  const jumlahRef = useRef<TextInput>(null);
+
+  /* ---------- GPS opsional (unchanged) ---------- */
+  const [latitude, setLatitude] = useState<number | null>(null);
+  const [longitude, setLongitude] = useState<number | null>(null);
+  const [locFetching, setLocFetching] = useState(false);
+  const format6 = (n: number | null) => (n == null ? '' : Number(n).toFixed(6));
+  const getLocationOnce = async () => {
+    try {
+      setLocFetching(true);
+      const { status } = await Location.requestForegroundPermissionsAsync();
+      if (status !== 'granted') return;
+      const last = await Location.getLastKnownPositionAsync({});
+      if (last?.coords) { setLatitude(last.coords.latitude); setLongitude(last.coords.longitude); }
+      const pos = await Promise.race([
+        Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced, mayShowUserSettingsDialog: false }),
+        new Promise<never>((_, reject) => setTimeout(() => reject(new Error('gps-timeout')), 4000)),
+      ]).catch(() => null as any);
+      if (pos?.coords) { setLatitude(pos.coords.latitude); setLongitude(pos.coords.longitude); }
+    } finally { setLocFetching(false); }
+  };
+  useEffect(() => { getLocationOnce().catch(() => {}); }, []);
+
   useEffect(() => {
     const unsub = NetInfo.addEventListener(async state => {
       if (state.isConnected) {
@@ -143,20 +171,17 @@ export default function AparMaintenance() {
 
     let arr: any[] = [];
     const kc = apar.keperluan_check;
-    if (typeof kc === 'string') {
-      try { arr = JSON.parse(kc); } catch { arr = []; }
-    } else if (Array.isArray(kc)) {
-      arr = kc;
-    }
+    if (typeof kc === 'string') { try { arr = JSON.parse(kc); } catch { arr = []; } }
+    else if (Array.isArray(kc)) { arr = kc; }
 
-    setChecklistStates(
-      arr.map((o: any) => ({
-        checklistId: o.checklistId ?? o.Id ?? o.id,
-        item: o.question || o.Pertanyaan || o.pertanyaan || '(no question)',
-        condition: null,
-        alasan: '',
-      }))
-    );
+    const mapped = arr.map((o: any) => ({
+      checklistId: o.checklistId ?? o.Id ?? o.id,
+      item: o.question || o.Pertanyaan || o.pertanyaan || '(no question)',
+      condition: null,
+      alasan: '',
+    }));
+    setChecklistStates(mapped);
+    alasanRefs.current = mapped.map(() => React.createRef<TextInput>());
 
     if (apar.namaIntervalPetugas && apar.bulanIntervalPetugas) {
       setIntervalLabel(`${apar.namaIntervalPetugas} (${apar.bulanIntervalPetugas} bulan)`);
@@ -172,14 +197,8 @@ export default function AparMaintenance() {
   const persistDetailCache = async (json: any) => {
     const apar = normalizeApar(json);
     const idStr = String(apar.id_apar);
-
     const routeParams: any = route.params || {};
-    const tokenStr =
-      routeParams.token ||
-      json?.TokenQR ||
-      json?.token ||
-      json?.Token ||
-      null;
+    const tokenStr = routeParams.token || json?.TokenQR || json?.token || json?.Token || null;
 
     const pairs: [string, string][] = [
       [`${DETAIL_ID_PREFIX}${idStr}`, JSON.stringify(json)],
@@ -296,48 +315,34 @@ export default function AparMaintenance() {
   };
 
   const handleSubmit = async () => {
-    if (!badgeNumber || !data) {
-      Alert.alert('Error','Data tidak lengkap');
-      return;
-    }
+    if (!badgeNumber || !data) { Alert.alert('Error','Data tidak lengkap'); return; }
     for (const c of checklistStates) {
       if (!c.condition || (c.condition === 'Tidak Baik' && !c.alasan)) {
-        Alert.alert('Validasi','Lengkapi semua checklist dan alasan jika perlu');
-        return;
+        Alert.alert('Validasi','Lengkapi semua checklist dan alasan jika perlu'); return;
       }
     }
 
+    await getLocationOnce().catch(() => {});
     setSubmitting(true);
     const formData = new FormData();
     formData.append('aparId', String(data.id_apar));
     formData.append('tanggal', new Date().toISOString());
     formData.append('badgeNumber', badgeNumber);
-    if (data.intervalPetugasId != null) {
-      formData.append('intervalPetugasId', String(data.intervalPetugasId));
-    }
+    if (data.intervalPetugasId != null) formData.append('intervalPetugasId', String(data.intervalPetugasId));
     formData.append('kondisi', kondisi);
     formData.append('catatanMasalah', catatanMasalah);
     formData.append('rekomendasi', rekomendasi);
     formData.append('tindakLanjut', tindakLanjut);
     formData.append('tekanan', tekanan);
     formData.append('jumlahMasalah', jumlahMasalah);
-    formData.append(
-      'checklist',
-      JSON.stringify(
-        checklistStates.map(c => ({
-          checklistId: c.checklistId,
-          condition: c.condition,
-          alasan: c.alasan,
-        }))
-      )
-    );
+    if (latitude != null) formData.append('latitude', format6(latitude));
+    if (longitude != null) formData.append('longitude', format6(longitude));
+    formData.append('checklist', JSON.stringify(checklistStates.map(c => ({
+      checklistId: c.checklistId, condition: c.condition, alasan: c.alasan,
+    })))); 
     fotoUris.forEach((uri, idx) => {
       const ext = uri.split('.').pop() || 'jpg';
-      formData.append('fotos', {
-        uri,
-        name: `photo${idx}.${ext}`,
-        type: `image/${ext}`,
-      } as any);
+      formData.append('fotos', { uri, name: `photo${idx}.${ext}`, type: `image/${ext}` } as any);
     });
 
     try {
@@ -360,9 +365,7 @@ export default function AparMaintenance() {
       }
     } catch (err: any) {
       Alert.alert('Error','Terjadi kesalahan: ' + err.message);
-    } finally {
-      setSubmitting(false);
-    }
+    } finally { setSubmitting(false); }
   };
 
   if (loading) {
@@ -383,26 +386,30 @@ export default function AparMaintenance() {
     );
   }
 
-  const onScrollBegin = (_e: NativeSyntheticEvent<NativeScrollEvent>) => {
-    // iOS handle by keyboardDismissMode, Android perlu manual
-    if (Platform.OS === 'android') Keyboard.dismiss();
-  };
+  const onScrollBegin = (_e: NativeSyntheticEvent<NativeScrollEvent>) => {};
+
+  const isIOS = Platform.OS === 'ios';
 
   return (
-    <KeyboardAvoidingView
-      style={{ flex: 1 }}
-      behavior={Platform.select({ ios: 'padding', android: 'height' })}
-      keyboardVerticalOffset={headerHeight + (insets.top || 0)}
-    >
-      {/* Tap area kosong = tutup keyboard */}
+    <View style={{ flex: 1 }}>
       <TouchableWithoutFeedback onPress={Keyboard.dismiss} accessible={false}>
         <ScrollContainer
           ref={scrollRef}
-          keyboardShouldPersistTaps="never"
-          keyboardDismissMode="on-drag"
+          // TANPA KeyboardAvoidingView, TANPA listener keyboard
+          // iOS hanya pakai insets otomatis dari OS (tanpa animasi kustom)
+          {...(isIOS ? { automaticallyAdjustKeyboardInsets: true } : {})}
+          keyboardShouldPersistTaps="always"
+          keyboardDismissMode={isIOS ? 'interactive' : 'on-drag'}
           onScrollBeginDrag={onScrollBegin}
-          // tidak ada padding/inset dinamis supaya tidak muncul area abu-abu
-          contentContainerStyle={{ paddingVertical: 8 }}
+          contentInsetAdjustmentBehavior="never"
+          contentContainerStyle={{
+            paddingTop: 8,
+            paddingBottom: 24 + insets.bottom,
+          }}
+          // iOS: cegah tap status bar auto-scroll to top
+          scrollsToTop={false}
+          // Pastikan tidak ada animasi yang kita trigger sendiri
+          scrollEventThrottle={0}
         >
           {/* DETAIL APAR */}
           <Card>
@@ -425,10 +432,19 @@ export default function AparMaintenance() {
               <View key={i} style={{ marginBottom: 16 }}>
                 <QuestionText>{c.item}</QuestionText>
                 <ButtonRow>
-                  <Toggle active={c.condition === 'Baik'} onPress={() => updateChecklist(i, { condition: 'Baik' })}>
+                  <Toggle
+                    active={c.condition === 'Baik'}
+                    onPress={() => updateChecklist(i, { condition: 'Baik' })}
+                  >
                     <ToggleText active={c.condition === 'Baik'}>Baik</ToggleText>
                   </Toggle>
-                  <Toggle active={c.condition === 'Tidak Baik'} onPress={() => updateChecklist(i, { condition: 'Tidak Baik' })}>
+                  <Toggle
+                    active={c.condition === 'Tidak Baik'}
+                    onPress={() => {
+                      // hanya set state, tanpa fokus & tanpa autoscroll
+                      updateChecklist(i, { condition: 'Tidak Baik' });
+                    }}
+                  >
                     <ToggleText active={c.condition === 'Tidak Baik'}>Tidak Baik</ToggleText>
                   </Toggle>
                 </ButtonRow>
@@ -436,6 +452,7 @@ export default function AparMaintenance() {
                   <>
                     <Label>Alasan:</Label>
                     <Input
+                      ref={alasanRefs.current[i]}
                       value={c.alasan}
                       onChangeText={t => updateChecklist(i, { alasan: t })}
                       placeholder="Jelaskan masalah"
@@ -445,6 +462,7 @@ export default function AparMaintenance() {
                       blurOnSubmit
                       onSubmitEditing={Keyboard.dismiss}
                       onBlur={Keyboard.dismiss}
+                      style={{ minHeight: 80 }}
                     />
                   </>
                 )}
@@ -463,72 +481,91 @@ export default function AparMaintenance() {
             ))}
           </Card>
 
+          {/* KOORDINAT (opsional) */}
+          <Card>
+            <RowBetween>
+              <Label>Koordinat :</Label>
+              <SmallButton onPress={getLocationOnce} disabled={locFetching}>
+                {locFetching ? <ActivityIndicator /> : <SmallButtonText>Ambil Koordinat</SmallButtonText>}
+              </SmallButton>
+            </RowBetween>
+            <CoordRow>
+              <CoordItem>
+                <SmallLabel>Latitude</SmallLabel>
+                <ReadOnlyInput value={latitude == null ? '—' : format6(latitude)} />
+              </CoordItem>
+              <CoordItem>
+                <SmallLabel>Longitude</SmallLabel>
+                <ReadOnlyInput value={longitude == null ? '—' : format6(longitude)} />
+              </CoordItem>
+            </CoordRow>
+          </Card>
+
           {/* FORM TAMBAHAN */}
           <Card>
             <Label>Kondisi Umum:</Label>
             <Input
+              ref={kondisiRef}
               value={kondisi}
               onChangeText={setKondisi}
               placeholder="Masukkan kondisi umum"
               returnKeyType="done"
-              blurOnSubmit
               onSubmitEditing={Keyboard.dismiss}
-              onBlur={Keyboard.dismiss}
             />
 
             <Label>Catatan Masalah:</Label>
             <Input
+              ref={catatanRef}
               value={catatanMasalah}
               onChangeText={setCatatanMasalah}
               placeholder="Masukkan catatan masalah"
               multiline
               textAlignVertical="top"
+              style={{ minHeight: 80 }}
               returnKeyType="done"
-              blurOnSubmit
               onSubmitEditing={Keyboard.dismiss}
-              onBlur={Keyboard.dismiss}
             />
 
             <Label>Rekomendasi:</Label>
             <Input
+              ref={rekomRef}
               value={rekomendasi}
               onChangeText={setRekomendasi}
               placeholder="Masukkan rekomendasi"
               multiline
               textAlignVertical="top"
+              style={{ minHeight: 80 }}
               returnKeyType="done"
-              blurOnSubmit
               onSubmitEditing={Keyboard.dismiss}
-              onBlur={Keyboard.dismiss}
             />
 
             <Label>Tindak Lanjut:</Label>
             <Input
+              ref={tindakRef}
               value={tindakLanjut}
               onChangeText={setTindakLanjut}
               placeholder="Masukkan tindak lanjut"
               multiline
               textAlignVertical="top"
+              style={{ minHeight: 80 }}
               returnKeyType="done"
-              blurOnSubmit
               onSubmitEditing={Keyboard.dismiss}
-              onBlur={Keyboard.dismiss}
             />
 
             <Label>Tekanan (bar):</Label>
             <Input
+              ref={tekananRef}
               value={tekanan}
               onChangeText={setTekanan}
               placeholder="Masukkan tekanan"
               keyboardType="numeric"
               returnKeyType="done"
-              blurOnSubmit
               onSubmitEditing={Keyboard.dismiss}
-              onBlur={Keyboard.dismiss}
             />
 
             <Label>Jumlah Masalah:</Label>
             <Input
+              ref={jumlahRef}
               value={jumlahMasalah}
               onChangeText={setJumlahMasalah}
               placeholder="Masukkan jumlah masalah"
@@ -545,46 +582,44 @@ export default function AparMaintenance() {
           </SubmitButton>
         </ScrollContainer>
       </TouchableWithoutFeedback>
-    </KeyboardAvoidingView>
+    </View>
   );
 }
 
-// ========== STYLED ==========
+/* ============ Styled ============ */
 const Centered = styled(View)` flex: 1; justify-content: center; align-items: center; padding: 20px; `;
-const ScrollContainer = styled(ScrollView).attrs({
-  keyboardShouldPersistTaps: 'never',
-})` flex: 1; background-color: #f9fafb; `;
+const ScrollContainer = styled(ScrollView).attrs({ keyboardShouldPersistTaps: 'always' })`
+  flex: 1; background-color: #f9fafb;
+`;
 const Card = styled(View)` background: #fff; margin: 12px 16px; padding: 16px; border-radius: 8px; elevation: 2; `;
 const Label = styled(Text)` font-size: 14px; font-weight: 600; color: #374151; margin-bottom: 8px; margin-top: 4px; `;
-const ReadOnlyInput = styled(TextInput).attrs({
-  editable: false,
-  placeholderTextColor: '#9CA3AF',
-})`
-  background: #f3f4f6;
-  padding: 12px;
-  border-radius: 6px;
-  margin-bottom: 12px;
-  color: #6b7280;
-  font-size: 14px;
+const SmallLabel = styled(Text)` font-size: 12px; font-weight: 600; color: #6b7280; margin-bottom: 4px; `;
+const ReadOnlyInput = styled(TextInput).attrs({ editable: false, placeholderTextColor: '#9CA3AF' })`
+  background: #f3f4f6; padding: 12px; border-radius: 6px; margin-bottom: 12px; color: #6b7280; font-size: 14px;
 `;
 const Input = styled(TextInput).attrs({
-  placeholderTextColor: '#9CA3AF',
-  selectionColor: '#dc2626',
-  cursorColor: '#dc2626',
-  autoCapitalize: 'sentences',
-  autoCorrect: false,
+  placeholderTextColor: '#9CA3AF', selectionColor: '#dc2626', cursorColor: '#dc2626', autoCapitalize: 'sentences', autoCorrect: false,
 })`
-  background: #fff;
-  border: 1px solid #d1d5db;
-  padding: 12px;
-  border-radius: 6px;
-  margin-bottom: 12px;
-  color: #111827;
+  background: #fff; border: 1px solid #d1d5db; padding: 12px; border-radius: 6px; margin-bottom: 12px; color: #111827;
 `;
 const QuestionText = styled(Text)` font-size: 15px; font-weight: 500; color: #374151; margin-bottom: 8px; `;
 const ButtonRow = styled(View)` flex-direction: row; margin-bottom: 12px; justify-content: space-between; `;
-const Toggle = styled(Pressable)<{ active: boolean }>` flex: 1; background-color: ${({ active }) => (active ? '#dc2626' : '#f3f4f6')}; padding: 12px; border-radius: 6px; align-items: center; margin-horizontal: 4px; border-width: 1px; border-color: ${({ active }) => (active ? '#dc2626' : '#d1d5db')}; `;
+const Toggle = styled(Pressable)<{ active: boolean }>`
+  flex: 1; background-color: ${({ active }) => (active ? '#dc2626' : '#f3f4f6')};
+  padding: 12px; border-radius: 6px; align-items: center; margin-horizontal: 4px;
+  border-width: 1px; border-color: ${({ active }) => (active ? '#dc2626' : '#d1d5db')};
+`;
 const ToggleText = styled(Text)<{ active: boolean }>` color: ${({ active }) => (active ? '#fff' : '#6b7280')}; font-weight: 600; font-size: 14px; `;
-const uploadStyle = { backgroundColor: '#f3f4f6', padding: 16, borderRadius: 6, alignItems: 'center', marginBottom: 12, borderWidth: 2, borderColor: '#d1d5db', borderStyle: 'dashed', } as const;
-const SubmitButton = styled(Pressable)<{ disabled?: boolean }>` background-color: ${({ disabled }) => (disabled ? '#9ca3af' : '#dc2626')}; padding: 16px; margin: 20px 16px 0; border-radius: 8px; align-items: center; `;
+const uploadStyle = { backgroundColor: '#f3f4f6', padding: 16, borderRadius: 6, alignItems: 'center', marginBottom: 12, borderWidth: 2, borderColor: '#d1d5db', borderStyle: 'dashed' } as const;
+const SubmitButton = styled(Pressable)<{ disabled?: boolean }>`
+  background-color: ${({ disabled }) => (disabled ? '#9ca3af' : '#dc2626')};
+  padding: 16px; margin: 20px 16px 12px; border-radius: 8px; align-items: center;
+`;
 const SubmitText = styled(Text)` color: #fff; font-size: 16px; font-weight: bold; `;
+const RowBetween = styled(View)` flex-direction: row; justify-content: space-between; align-items: center; `;
+const SmallButton = styled(Pressable)<{ disabled?: boolean }>`
+  padding: 8px 12px; border-radius: 6px; border: 1px solid #d1d5db; opacity: ${({ disabled }) => (disabled ? 0.6 : 1)};
+`;
+const SmallButtonText = styled(Text)` font-size: 12px; color: #111827; `;
+const CoordRow = styled(View)` flex-direction: row; gap: 12px; `;
+const CoordItem = styled(View)` flex: 1; `;

@@ -27,11 +27,29 @@ import { __CONFIG_DEBUG__, baseUrl, logApiConfig } from '@/src/config';
 import { installFetchLogger } from '@/src/setupNetworking';
 import { createLogger } from '@/src/utils/logger';
 
+// === (NEW) Notifikasi APAR ===
+import { useAparNotifications } from '@/hooks/useAparNotifications';
+import type { AparItem } from '@/src/notifications/aparReminders';
+
 installFetchLogger();
 const log = createLogger('home');
 
 const INITIAL_COUNT = 3;
 const FORCE_CTA_MS = 12000;
+
+/**
+ * (DEV) Override detik untuk test cepat notifikasi.
+ * - Ubah ke 10 saat ingin uji cepat (notifikasi muncul 10 detik).
+ * - Biarkan undefined untuk produksi (pakai H-X @ 09:00 lokal).
+ */
+const DEBUG_NOTIF_SECONDS: number | undefined = undefined;
+
+/**
+ * (DEV) Gonta-ganti H-X di FE:
+ * - Set ke 2 untuk H-2 (default produksi).
+ * - Ganti ke 5 untuk H-5 saat testing, dst.
+ */
+const DEBUG_DAYS_BEFORE = 2;
 
 async function debugPing(tag: string) {
   const url = `${baseUrl}/api/peralatan?badge=PING`;
@@ -204,6 +222,59 @@ export default function AparInformasi() {
       .filter(i => !selectedJenis || i.jenis_apar === selectedJenis),
     [listByLokasi, selectedJenis]
   );
+
+  // ============================== (NEW) Mapper data → AparItem untuk notifikasi ==============================
+  const aparsForNotif: AparItem[] = useMemo(() => {
+    // helper ambil NextDueDate dari berbagai kemungkinan field yang sudah ada di app
+    const getNextDueISO = (it: any): string | null => {
+      const cand =
+        it?.NextDueDate ??
+        it?.nextDueDate ??
+        it?.next_due_date ??
+        it?.NextDueDateAtTime ??
+        it?.nextDueDateAtTime ??
+        null;
+      if (!cand) return null;
+      try {
+        const d = new Date(cand);
+        return isNaN(d.getTime()) ? null : d.toISOString();
+      } catch {
+        return null;
+      }
+    };
+    const getKode = (it: any, id: number | string) =>
+      it?.no_apar ?? it?.Kode ?? it?.kode ?? it?.kode_apar ?? `APAR-${id}`;
+    const getToken = (it: any) =>
+      it?.TokenQR ?? it?.token ?? it?.token_qr ?? it?.Token ?? null;
+
+    return listByLokasi
+      .map((it: any) => {
+        const id =
+          it?.id_apar ?? it?.PeralatanId ?? it?.aparId ?? it?.Id ?? null;
+        const nextDue = getNextDueISO(it);
+        if (!id || !nextDue) return null; // hanya jadwalkan bila ada due date
+
+        const item: AparItem = {
+          Id: Number(id),
+          Kode: String(getKode(it, id)),
+          LokasiNama: it?.lokasi_apar ?? it?.LokasiNama ?? it?.lokasi_nama ?? null,
+          JenisNama: it?.jenis_apar ?? it?.JenisNama ?? it?.jenis_nama ?? null,
+          TokenQR: getToken(it),
+          NextDueDate: nextDue,
+        };
+        return item;
+      })
+      .filter(Boolean) as AparItem[];
+  }, [listByLokasi]);
+
+  // Pasang notifikasi terjadwal — H-X diatur dari FE via DEBUG_DAYS_BEFORE
+  useAparNotifications({
+    apars: aparsForNotif,
+    daysBefore: DEBUG_DAYS_BEFORE,            // ← ganti ke 5 untuk H-5 testing
+    debugOverrideSeconds: DEBUG_NOTIF_SECONDS // opsional: paksa muncul cepat
+  });
+
+  // ===========================================================================================================
 
   if (loading) {
     return (

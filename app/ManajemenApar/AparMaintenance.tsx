@@ -10,6 +10,7 @@ import {
   Alert,
   Image,
   Keyboard,
+  KeyboardAvoidingView,
   NativeScrollEvent,
   NativeSyntheticEvent,
   Platform,
@@ -368,6 +369,12 @@ export default function AparMaintenance() {
     } finally { setSubmitting(false); }
   };
 
+  // ====== Layout anti-overlap SEDERHANA & STABIL ======
+  // Satu-satunya mekanisme: KeyboardAvoidingView.
+  // Tidak ada listener keyboard, tidak ada padding dinamis → menghindari jitter/scroll otomatis.
+  const kavOffset = Platform.select({ ios: insets.top + 48, android: 0 }) as number;
+  const isIOS = Platform.OS === 'ios';
+
   if (loading) {
     return (
       <Centered>
@@ -388,207 +395,205 @@ export default function AparMaintenance() {
 
   const onScrollBegin = (_e: NativeSyntheticEvent<NativeScrollEvent>) => {};
 
-  const isIOS = Platform.OS === 'ios';
-
   return (
     <View style={{ flex: 1 }}>
-      <TouchableWithoutFeedback onPress={Keyboard.dismiss} accessible={false}>
-        <ScrollContainer
-          ref={scrollRef}
-          // TANPA KeyboardAvoidingView, TANPA listener keyboard
-          // iOS hanya pakai insets otomatis dari OS (tanpa animasi kustom)
-          {...(isIOS ? { automaticallyAdjustKeyboardInsets: true } : {})}
-          keyboardShouldPersistTaps="always"
-          keyboardDismissMode={isIOS ? 'interactive' : 'on-drag'}
-          onScrollBeginDrag={onScrollBegin}
-          contentInsetAdjustmentBehavior="never"
-          contentContainerStyle={{
-            paddingTop: 8,
-            paddingBottom: 24 + insets.bottom,
-          }}
-          // iOS: cegah tap status bar auto-scroll to top
-          scrollsToTop={false}
-          // Pastikan tidak ada animasi yang kita trigger sendiri
-          scrollEventThrottle={0}
-        >
-          {/* DETAIL APAR */}
-          <Card>
-            <Label>No APAR:</Label>
-            <ReadOnlyInput value={String(data.no_apar ?? '')} />
-            <Label>Lokasi:</Label>
-            <ReadOnlyInput value={String(data.lokasi_apar ?? '')} />
-            <Label>Jenis:</Label>
-            <ReadOnlyInput value={String(data.jenis_apar ?? '')} />
-            <Label>Interval:</Label>
-            <ReadOnlyInput value={String(intervalLabel ?? '—')} />
-            <Label>Next Due:</Label>
-            <ReadOnlyInput value={String(data.nextDueDate ?? '—')} />
-          </Card>
+      <KeyboardAvoidingView
+        style={{ flex: 1 }}
+        behavior={isIOS ? 'padding' : 'height'}
+        keyboardVerticalOffset={kavOffset}
+      >
+        <TouchableWithoutFeedback onPress={Keyboard.dismiss} accessible={false}>
+          <ScrollContainer
+            ref={scrollRef}
+            // KAV sudah handle insets → matikan auto-insets iOS agar tidak dobel
+            {...(isIOS ? { automaticallyAdjustKeyboardInsets: false, contentInsetAdjustmentBehavior: 'never' } : {})}
+            keyboardShouldPersistTaps="handled"
+            keyboardDismissMode={isIOS ? 'interactive' : 'on-drag'}
+            onScrollBeginDrag={onScrollBegin}
+            // Padding bawah STATIS (stabil), cukup untuk tombol + safe area.
+            contentContainerStyle={{
+              paddingTop: 8,
+              paddingBottom: 24 + insets.bottom,
+            }}
+            scrollsToTop={false}
+            scrollEventThrottle={0}
+          >
+            {/* DETAIL APAR */}
+            <Card>
+              <Label>No APAR:</Label>
+              <ReadOnlyInput value={String(data.no_apar ?? '')} />
+              <Label>Lokasi:</Label>
+              <ReadOnlyInput value={String(data.lokasi_apar ?? '')} />
+              <Label>Jenis:</Label>
+              <ReadOnlyInput value={String(data.jenis_apar ?? '')} />
+              <Label>Interval:</Label>
+              <ReadOnlyInput value={String(intervalLabel ?? '—')} />
+              <Label>Next Due:</Label>
+              <ReadOnlyInput value={String(data.nextDueDate ?? '—')} />
+            </Card>
 
-          {/* CHECKLIST */}
-          <Card>
-            <Label>Checklist Pemeriksaan:</Label>
-            {checklistStates.map((c, i) => (
-              <View key={i} style={{ marginBottom: 16 }}>
-                <QuestionText>{c.item}</QuestionText>
-                <ButtonRow>
-                  <Toggle
-                    active={c.condition === 'Baik'}
-                    onPress={() => updateChecklist(i, { condition: 'Baik' })}
-                  >
-                    <ToggleText active={c.condition === 'Baik'}>Baik</ToggleText>
-                  </Toggle>
-                  <Toggle
-                    active={c.condition === 'Tidak Baik'}
-                    onPress={() => {
-                      // hanya set state, tanpa fokus & tanpa autoscroll
-                      updateChecklist(i, { condition: 'Tidak Baik' });
-                    }}
-                  >
-                    <ToggleText active={c.condition === 'Tidak Baik'}>Tidak Baik</ToggleText>
-                  </Toggle>
-                </ButtonRow>
-                {c.condition === 'Tidak Baik' && (
-                  <>
-                    <Label>Alasan:</Label>
-                    <Input
-                      ref={alasanRefs.current[i]}
-                      value={c.alasan}
-                      onChangeText={t => updateChecklist(i, { alasan: t })}
-                      placeholder="Jelaskan masalah"
-                      multiline
-                      textAlignVertical="top"
-                      returnKeyType="done"
-                      blurOnSubmit
-                      onSubmitEditing={Keyboard.dismiss}
-                      onBlur={Keyboard.dismiss}
-                      style={{ minHeight: 80 }}
-                    />
-                  </>
-                )}
-              </View>
-            ))}
-          </Card>
+            {/* CHECKLIST */}
+            <Card>
+              <Label>Checklist Pemeriksaan:</Label>
+              {checklistStates.map((c, i) => (
+                <View key={i} style={{ marginBottom: 16 }}>
+                  <QuestionText>{c.item}</QuestionText>
+                  <ButtonRow>
+                    <Toggle
+                      active={c.condition === 'Baik'}
+                      onPress={() => updateChecklist(i, { condition: 'Baik' })}
+                    >
+                      <ToggleText active={c.condition === 'Baik'}>Baik</ToggleText>
+                    </Toggle>
+                    <Toggle
+                      active={c.condition === 'Tidak Baik'}
+                      onPress={() => updateChecklist(i, { condition: 'Tidak Baik' })}
+                    >
+                      <ToggleText active={c.condition === 'Tidak Baik'}>Tidak Baik</ToggleText>
+                    </Toggle>
+                  </ButtonRow>
+                  {c.condition === 'Tidak Baik' && (
+                    <>
+                      <Label>Alasan:</Label>
+                      <Input
+                        ref={alasanRefs.current[i]}
+                        value={c.alasan}
+                        onChangeText={t => updateChecklist(i, { alasan: t })}
+                        placeholder="Jelaskan masalah"
+                        multiline
+                        textAlignVertical="top"
+                        returnKeyType="done"
+                        blurOnSubmit
+                        onSubmitEditing={Keyboard.dismiss}
+                        onBlur={Keyboard.dismiss}
+                        style={{ minHeight: 80 }}
+                      />
+                    </>
+                  )}
+                </View>
+              ))}
+            </Card>
 
-          {/* FOTO */}
-          <Card>
-            <Label>Foto Pemeriksaan:</Label>
-            <Pressable style={uploadStyle} onPress={pickImages}>
-              <Text>Tap untuk pilih foto…</Text>
-            </Pressable>
-            {fotoUris.map((uri, idx) => (
-              <Image key={idx} source={{ uri }} style={{ width: 100, height: 100, marginBottom: 8 }} />
-            ))}
-          </Card>
+            {/* FOTO */}
+            <Card>
+              <Label>Foto Pemeriksaan:</Label>
+              <Pressable style={uploadStyle} onPress={pickImages}>
+                <Text>Tap untuk pilih foto…</Text>
+              </Pressable>
+              {fotoUris.map((uri, idx) => (
+                <Image key={idx} source={{ uri }} style={{ width: 100, height: 100, marginBottom: 8 }} />
+              ))}
+            </Card>
 
-          {/* KOORDINAT (opsional) */}
-          <Card>
-            <RowBetween>
-              <Label>Koordinat :</Label>
-              <SmallButton onPress={getLocationOnce} disabled={locFetching}>
-                {locFetching ? <ActivityIndicator /> : <SmallButtonText>Ambil Koordinat</SmallButtonText>}
-              </SmallButton>
-            </RowBetween>
-            <CoordRow>
-              <CoordItem>
-                <SmallLabel>Latitude</SmallLabel>
-                <ReadOnlyInput value={latitude == null ? '—' : format6(latitude)} />
-              </CoordItem>
-              <CoordItem>
-                <SmallLabel>Longitude</SmallLabel>
-                <ReadOnlyInput value={longitude == null ? '—' : format6(longitude)} />
-              </CoordItem>
-            </CoordRow>
-          </Card>
+            {/* KOORDINAT (opsional) */}
+            <Card>
+              <RowBetween>
+                <Label>Koordinat :</Label>
+                <SmallButton onPress={getLocationOnce} disabled={locFetching}>
+                  {locFetching ? <ActivityIndicator /> : <SmallButtonText>Ambil Koordinat</SmallButtonText>}
+                </SmallButton>
+              </RowBetween>
+              <CoordRow>
+                <CoordItem>
+                  <SmallLabel>Latitude</SmallLabel>
+                  <ReadOnlyInput value={latitude == null ? '—' : format6(latitude)} />
+                </CoordItem>
+                <CoordItem>
+                  <SmallLabel>Longitude</SmallLabel>
+                  <ReadOnlyInput value={longitude == null ? '—' : format6(longitude)} />
+                </CoordItem>
+              </CoordRow>
+            </Card>
 
-          {/* FORM TAMBAHAN */}
-          <Card>
-            <Label>Kondisi Umum:</Label>
-            <Input
-              ref={kondisiRef}
-              value={kondisi}
-              onChangeText={setKondisi}
-              placeholder="Masukkan kondisi umum"
-              returnKeyType="done"
-              onSubmitEditing={Keyboard.dismiss}
-            />
+            {/* FORM TAMBAHAN */}
+            <Card>
+              <Label>Kondisi Umum:</Label>
+              <Input
+                ref={kondisiRef}
+                value={kondisi}
+                onChangeText={setKondisi}
+                placeholder="Masukkan kondisi umum"
+                returnKeyType="done"
+                onSubmitEditing={Keyboard.dismiss}
+              />
 
-            <Label>Catatan Masalah:</Label>
-            <Input
-              ref={catatanRef}
-              value={catatanMasalah}
-              onChangeText={setCatatanMasalah}
-              placeholder="Masukkan catatan masalah"
-              multiline
-              textAlignVertical="top"
-              style={{ minHeight: 80 }}
-              returnKeyType="done"
-              onSubmitEditing={Keyboard.dismiss}
-            />
+              <Label>Catatan Masalah:</Label>
+              <Input
+                ref={catatanRef}
+                value={catatanMasalah}
+                onChangeText={setCatatanMasalah}
+                placeholder="Masukkan catatan masalah"
+                multiline
+                textAlignVertical="top"
+                style={{ minHeight: 80 }}
+                returnKeyType="done"
+                onSubmitEditing={Keyboard.dismiss}
+              />
 
-            <Label>Rekomendasi:</Label>
-            <Input
-              ref={rekomRef}
-              value={rekomendasi}
-              onChangeText={setRekomendasi}
-              placeholder="Masukkan rekomendasi"
-              multiline
-              textAlignVertical="top"
-              style={{ minHeight: 80 }}
-              returnKeyType="done"
-              onSubmitEditing={Keyboard.dismiss}
-            />
+              <Label>Rekomendasi:</Label>
+              <Input
+                ref={rekomRef}
+                value={rekomendasi}
+                onChangeText={setRekomendasi}
+                placeholder="Masukkan rekomendasi"
+                multiline
+                textAlignVertical="top"
+                style={{ minHeight: 80 }}
+                returnKeyType="done"
+                onSubmitEditing={Keyboard.dismiss}
+              />
 
-            <Label>Tindak Lanjut:</Label>
-            <Input
-              ref={tindakRef}
-              value={tindakLanjut}
-              onChangeText={setTindakLanjut}
-              placeholder="Masukkan tindak lanjut"
-              multiline
-              textAlignVertical="top"
-              style={{ minHeight: 80 }}
-              returnKeyType="done"
-              onSubmitEditing={Keyboard.dismiss}
-            />
+              <Label>Tindak Lanjut:</Label>
+              <Input
+                ref={tindakRef}
+                value={tindakLanjut}
+                onChangeText={setTindakLanjut}
+                placeholder="Masukkan tindak lanjut"
+                multiline
+                textAlignVertical="top"
+                style={{ minHeight: 80 }}
+                returnKeyType="done"
+                onSubmitEditing={Keyboard.dismiss}
+              />
 
-            <Label>Tekanan (bar):</Label>
-            <Input
-              ref={tekananRef}
-              value={tekanan}
-              onChangeText={setTekanan}
-              placeholder="Masukkan tekanan"
-              keyboardType="numeric"
-              returnKeyType="done"
-              onSubmitEditing={Keyboard.dismiss}
-            />
+              <Label>Tekanan (bar):</Label>
+              <Input
+                ref={tekananRef}
+                value={tekanan}
+                onChangeText={setTekanan}
+                placeholder="Masukkan tekanan"
+                keyboardType="numeric"
+                returnKeyType="done"
+                onSubmitEditing={Keyboard.dismiss}
+              />
 
-            <Label>Jumlah Masalah:</Label>
-            <Input
-              ref={jumlahRef}
-              value={jumlahMasalah}
-              onChangeText={setJumlahMasalah}
-              placeholder="Masukkan jumlah masalah"
-              keyboardType="numeric"
-              returnKeyType="done"
-              blurOnSubmit
-              onSubmitEditing={Keyboard.dismiss}
-              onBlur={Keyboard.dismiss}
-            />
-          </Card>
+              <Label>Jumlah Masalah:</Label>
+              <Input
+                ref={jumlahRef}
+                value={jumlahMasalah}
+                onChangeText={setJumlahMasalah}
+                placeholder="Masukkan jumlah masalah"
+                keyboardType="numeric"
+                returnKeyType="done"
+                blurOnSubmit
+                onSubmitEditing={Keyboard.dismiss}
+                onBlur={Keyboard.dismiss}
+              />
+            </Card>
 
-          <SubmitButton disabled={submitting} onPress={handleSubmit}>
-            {submitting ? <ActivityIndicator color="#fff" /> : <SubmitText>Simpan Maintenance</SubmitText>}
-          </SubmitButton>
-        </ScrollContainer>
-      </TouchableWithoutFeedback>
+            <SubmitButton disabled={submitting} onPress={handleSubmit}>
+              {submitting ? <ActivityIndicator color="#fff" /> : <SubmitText>Simpan Maintenance</SubmitText>}
+            </SubmitButton>
+          </ScrollContainer>
+        </TouchableWithoutFeedback>
+      </KeyboardAvoidingView>
     </View>
   );
 }
 
 /* ============ Styled ============ */
 const Centered = styled(View)` flex: 1; justify-content: center; align-items: center; padding: 20px; `;
-const ScrollContainer = styled(ScrollView).attrs({ keyboardShouldPersistTaps: 'always' })`
+const ScrollContainer = styled(ScrollView).attrs({ keyboardShouldPersistTaps: 'handled' })`
   flex: 1; background-color: #f9fafb;
 `;
 const Card = styled(View)` background: #fff; margin: 12px 16px; padding: 16px; border-radius: 8px; elevation: 2; `;

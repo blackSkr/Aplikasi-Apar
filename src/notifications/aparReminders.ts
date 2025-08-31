@@ -7,6 +7,13 @@ const log = createLogger('notif');
 const NOTIF_MAP_KEY = 'APAR_NOTIF_MAP'; // { [tokenKey]: { id: string, due: string } }
 const DAYS_BEFORE_KEY = 'APAR_DAYS_BEFORE_OVERRIDE'; // number | null
 
+// ====== KONSTAN DESAIN NOTIF ======
+const CHANNEL_ID = 'apar-reminders';
+const CHANNEL_NAME = 'APAR Reminders';
+const CHANNEL_DESC = 'Pengingat jatuh tempo inspeksi APAR';
+const BRAND_COLOR = '#FF3B30'; // samakan dengan app.json notification.color
+const VIBRATE_PATTERN: number[] = [0, 250, 200, 250]; // start, vibrate, pause, vibrate
+
 export type AparItem = {
   Id: number;
   Kode: string;
@@ -28,30 +35,37 @@ const fmt = (x: any) => {
 let setupDone = false;
 export async function ensureNotifSetup() {
   if (setupDone) return;
+
   if (Platform.OS === 'android') {
-    await Notifications.setNotificationChannelAsync('apar-reminders', {
-      name: 'APAR Reminders',
+    await Notifications.setNotificationChannelAsync(CHANNEL_ID, {
+      name: CHANNEL_NAME,
+      description: CHANNEL_DESC,
       importance: Notifications.AndroidImportance.HIGH,
       lockscreenVisibility: Notifications.AndroidNotificationVisibility.PUBLIC,
       enableVibrate: true,
+      vibrationPattern: VIBRATE_PATTERN,
       enableLights: true,
+      lightColor: BRAND_COLOR,
       sound: 'default',
-      showBadge: true,
+      showBadge: true
     });
   }
+
   const p = await Notifications.getPermissionsAsync();
   if (!p.granted) {
     const req = await Notifications.requestPermissionsAsync();
     log.info('[perm] requested →', req);
   }
+
   Notifications.setNotificationHandler({
     handleNotification: async () => ({
       shouldShowAlert: true,
       shouldPlaySound: true,
       shouldSetBadge: false,
-      priority: Notifications.AndroidNotificationPriority.MAX,
-    }),
+      priority: Notifications.AndroidNotificationPriority.MAX
+    })
   });
+
   setupDone = true;
 }
 
@@ -98,15 +112,26 @@ function computeReminderTime(nextDueISO: string, daysBefore = 2) {
   return remind;
 }
 
-function buildContent(item: AparItem) {
+// Utility judul/body yang rapi & profesional
+function buildContent(item: AparItem, daysBefore: number) {
+  const lokasi = item.LokasiNama ?? '-';
+  const jenis = item.JenisNama ?? 'APAR';
+  // judul dinamis mengikuti H-X
+  const title = `Pengingat H-${daysBefore}: ${item.Kode}`;
+  // body ringkas, otomatis jadi expanded/big text saat panjang (Android)
+  const body = `${jenis} • ${lokasi}\nInspeksi akan jatuh tempo. Ketuk untuk buka detail.`;
   return {
-    title: `APAR ${item.Kode} due H-2`,
-    body: `${item.JenisNama ?? 'APAR'} @ ${item.LokasiNama ?? '-'} akan jatuh tempo inspeksi.`,
+    title,
+    body,
     data: {
       tokenQR: item.TokenQR ?? String(item.Id),
       peralatanId: item.Id,
-      kode: item.Kode,
+      kode: item.Kode
     },
+    // styling per notifikasi (Android focus)
+    color: BRAND_COLOR,
+    sound: true,
+    priority: Notifications.AndroidNotificationPriority.MAX
   };
 }
 
@@ -209,8 +234,8 @@ export async function scheduleRemindersForList(apars: AparItem[], opts?: Schedul
         : remindAt;
 
       const id = await Notifications.scheduleNotificationAsync({
-        content: { ...buildContent(a), sound: true },
-        trigger,
+        content: { ...buildContent(a, daysBefore), channelId: CHANNEL_ID },
+        trigger
       });
 
       map[key] = { id, due: dueISO };
@@ -269,8 +294,15 @@ export async function hardResetScheduled() {
 export async function scheduleTestReminder(text = 'Tes notifikasi APAR', seconds = 10) {
   await ensureNotifSetup();
   const id = await Notifications.scheduleNotificationAsync({
-    content: { title: '🔔 Pengujian Notifikasi', body: text, data: { test: true }, sound: true },
-    trigger: { seconds },
+    content: {
+      title: '🔔 Pengujian Notifikasi',
+      body: text,
+      data: { test: true },
+      color: BRAND_COLOR,
+      priority: Notifications.AndroidNotificationPriority.MAX,
+      channelId: CHANNEL_ID
+    },
+    trigger: { seconds }
   });
   log.info(`[test] scheduled id=${id} in ${seconds}s`);
   await debugListScheduled('after-test');

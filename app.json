@@ -27,10 +27,18 @@
       "softwareKeyboardLayoutMode": "pan",
       "edgeToEdgeEnabled": true,
       "permissions": [
+        "android.permission.POST_NOTIFICATIONS",
         "android.permission.CAMERA",
         "android.permission.ACCESS_FINE_LOCATION",
         "android.permission.ACCESS_COARSE_LOCATION"
-      ]
+      ],
+      "googleServicesFile": "./google-services.json"
+    },
+
+    "notification": {
+      "icon": "./assets/images/kpc-logo.png",
+      "color": "#FF3B30",
+      "iosDisplayInForeground": true
     },
 
     "web": {
@@ -42,9 +50,7 @@
     "plugins": [
       [
         "expo-build-properties",
-        {
-          "android": { "usesCleartextTraffic": true }
-        }
+        { "android": { "usesCleartextTraffic": true } }
       ],
       "expo-router",
       [
@@ -55,7 +61,8 @@
           "resizeMode": "contain",
           "backgroundColor": "#ffffff"
         }
-      ]
+      ],
+      "expo-notifications"
     ],
 
     "experiments": { "typedRoutes": true },

@@ -1,8 +1,8 @@
 import {
-    AparItem,
-    ensureNotifSetup,
-    registerNotificationListeners,
-    scheduleRemindersForList,
+  AparItem,
+  ensureNotifSetup,
+  registerNotificationListeners,
+  scheduleRemindersForList,
 } from '@/src/notifications/aparReminders';
 import { useRouter } from 'expo-router';
 import { useEffect, useMemo, useRef } from 'react';
